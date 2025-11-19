@@ -14,9 +14,11 @@ export default function GameRoom() {
   const roomId = params.roomId;
   const shouldCreate = searchParams.get('create') === 'true';
   
-  const { gameState, loading, updateCell, updateNotes, clearNotes, clearModeContent, isOffline, setLocalGameState } = useGameState(roomId);
-  const [selectedCell, setSelectedCell] = useState(null);
+  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, isOffline, setLocalGameState } = useGameState(roomId);
+  const [selectedCells, setSelectedCells] = useState(new Set()); // Set of "r-c" strings
   const [inputMode, setInputMode] = useState('answer'); // 'answer', 'center', 'corner', 'color'
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState('add'); // 'add' or 'remove' - for Ctrl+drag behavior
 
   // Generate game if needed (offline or explicit create)
   useEffect(() => {
@@ -27,61 +29,187 @@ export default function GameRoom() {
       }
   }, [loading, gameState, isOffline, shouldCreate, setLocalGameState]);
 
-  const handleCellClick = (r, c) => {
-    setSelectedCell({ r, c });
+  const handleMouseDown = (r, c, e) => {
+      const cellKey = `${r}-${c}`;
+      
+      if (e.ctrlKey || e.metaKey) {
+          // Ctrl+drag: determine mode based on first cell
+          const wasSelected = selectedCells.has(cellKey);
+          setDragMode(wasSelected ? 'remove' : 'add');
+          setIsDragging(true);
+          
+          // Toggle the first cell
+          setSelectedCells(prev => {
+              const newSet = new Set(prev);
+              if (wasSelected) {
+                  newSet.delete(cellKey);
+              } else {
+                  newSet.add(cellKey);
+              }
+              return newSet;
+          });
+      } else {
+          // Normal drag: always add mode, start fresh selection
+          setDragMode('add');
+          setIsDragging(true);
+          setSelectedCells(new Set([cellKey]));
+      }
   };
 
+  const handleMouseEnter = (r, c) => {
+      if (isDragging) {
+          const cellKey = `${r}-${c}`;
+          setSelectedCells(prev => {
+              const newSet = new Set(prev);
+              if (dragMode === 'add') {
+                  newSet.add(cellKey);
+              } else {
+                  newSet.delete(cellKey);
+              }
+              return newSet;
+          });
+      }
+  };
+
+  const handleMouseUp = () => {
+      setIsDragging(false);
+  };
+
+  // Global mouse up to catch releases outside board
+  useEffect(() => {
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
   const handleNumberClick = useCallback((num) => {
-    if (!selectedCell) return;
-    const { r, c } = selectedCell;
+    if (selectedCells.size === 0) return;
 
     if (inputMode === 'answer') {
-        const currentValue = gameState.board[r][c];
-        const newValue = currentValue === num ? 0 : num;
-        updateCell(r, c, newValue);
-    } else {
-        // Notes mode
-        if (gameState.board[r][c] !== 0) return; 
-        updateNotes(r, c, inputMode, num);
-    }
-  }, [selectedCell, inputMode, gameState, updateCell, updateNotes]);
+      // Check if ALL selected cells have this number
+      let allHaveNumber = true;
+      selectedCells.forEach(cellKey => {
+        const [r, c] = cellKey.split('-').map(Number);
+        if (gameState.board[r][c] !== num) {
+          allHaveNumber = false;
+        }
+      });
 
-  const handleDelete = useCallback(() => {
-    if (selectedCell) {
-      const { r, c } = selectedCell;
-      if (inputMode === 'answer') {
-          updateCell(r, c, 0);
-      } else {
-          clearModeContent(r, c, inputMode);
+      // If all have it, remove it. Otherwise, add it to all.
+      const updates = [];
+      selectedCells.forEach(cellKey => {
+        const [r, c] = cellKey.split('-').map(Number);
+        const newValue = allHaveNumber ? 0 : num;
+        updates.push({ row: r, col: c, value: newValue });
+      });
+      updateCellsBatch(updates);
+    } else {
+      // For notes mode, check if ALL empty cells have this note
+      const emptyCells = [];
+      selectedCells.forEach(cellKey => {
+        const [r, c] = cellKey.split('-').map(Number);
+        if (gameState.board[r][c] === 0) {
+          emptyCells.push({ r, c, key: cellKey });
+        }
+      });
+
+      if (emptyCells.length === 0) return;
+
+      // Check if ALL empty cells have this note/color
+      let allHaveNote = true;
+      emptyCells.forEach(({ r, c }) => {
+        const cellNotes = gameState.notes?.[r]?.[c];
+        if (!cellNotes) {
+          allHaveNote = false;
+          return;
+        }
+
+        if (inputMode === 'center') {
+          if (!cellNotes.center.includes(num)) {
+            allHaveNote = false;
+          }
+        } else if (inputMode === 'corner') {
+          if (!cellNotes.corner.includes(num)) {
+            allHaveNote = false;
+          }
+        } else if (inputMode === 'color') {
+          const colors = [
+            '#fecaca', '#fed7aa', '#fde68a',
+            '#bbf7d0', '#a5f3fc', '#bfdbfe',
+            '#ddd6fe', '#f5d0fe', '#e5e7eb'
+          ];
+          const targetColor = colors[num - 1];
+          const colorArray = cellNotes.colors || [];
+          if (!colorArray.includes(targetColor)) {
+            allHaveNote = false;
+          }
+        }
+      });
+
+      // Apply the same action to all cells
+      const updates = [];
+      emptyCells.forEach(({ r, c }) => {
+        updates.push({ row: r, col: c, type: inputMode, value: num, shouldRemove: allHaveNote });
+      });
+      
+      if (updates.length > 0) {
+        updateNotesBatch(updates);
       }
     }
-  }, [selectedCell, inputMode, updateCell, clearModeContent]);
+  }, [selectedCells, inputMode, gameState, updateCellsBatch, updateNotesBatch]);
+
+  const handleDelete = useCallback(() => {
+    if (selectedCells.size > 0) {
+      if (inputMode === 'answer') {
+        // Batch clear for answer mode
+        const updates = [];
+        selectedCells.forEach(cellKey => {
+          const [r, c] = cellKey.split('-').map(Number);
+          updates.push({ row: r, col: c, value: 0 });
+        });
+        updateCellsBatch(updates);
+      } else {
+        // Batch clear for mode content
+        const updates = [];
+        selectedCells.forEach(cellKey => {
+          const [r, c] = cellKey.split('-').map(Number);
+          updates.push({ row: r, col: c, mode: inputMode });
+        });
+        clearModeContentBatch(updates);
+      }
+    }
+  }, [selectedCells, inputMode, updateCellsBatch, clearModeContentBatch]);
 
   // Handle keyboard input
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (!selectedCell) return;
+      if (selectedCells.size === 0) return;
       
-      const { r, c } = selectedCell;
-      
+      // Arrow keys only work with single cell selection
+      if (selectedCells.size === 1) {
+          const [r, c] = [...selectedCells][0].split('-').map(Number);
+          let newR = r, newC = c;
+          
+          if (e.key === 'ArrowUp') newR = Math.max(0, r - 1);
+          else if (e.key === 'ArrowDown') newR = Math.min(8, r + 1);
+          else if (e.key === 'ArrowLeft') newC = Math.max(0, c - 1);
+          else if (e.key === 'ArrowRight') newC = Math.min(8, c + 1);
+          
+          if (newR !== r || newC !== c) {
+              setSelectedCells(new Set([`${newR}-${newC}`]));
+              return;
+          }
+      }
+
       if (e.key >= '1' && e.key <= '9') {
         handleNumberClick(parseInt(e.key));
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
         handleDelete();
-      } else if (e.key === 'ArrowUp') {
-        setSelectedCell({ r: Math.max(0, r - 1), c });
-      } else if (e.key === 'ArrowDown') {
-        setSelectedCell({ r: Math.min(8, r + 1), c });
-      } else if (e.key === 'ArrowLeft') {
-        setSelectedCell({ r, c: Math.max(0, c - 1) });
-      } else if (e.key === 'ArrowRight') {
-        setSelectedCell({ r, c: Math.min(8, c + 1) });
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCell, handleNumberClick, handleDelete]);
+  }, [selectedCells, handleNumberClick, handleDelete]);
 
   const handleShare = () => {
     const url = window.location.href;
@@ -132,8 +260,9 @@ export default function GameRoom() {
         <div style={{ flex: '2 1 400px', maxWidth: '650px' }}>
           <Board 
             gameState={gameState} 
-            onCellClick={handleCellClick} 
-            selectedCell={selectedCell}
+            onMouseDown={handleMouseDown}
+            onMouseEnter={handleMouseEnter}
+            selectedCells={selectedCells}
             cages={gameState.cages}
           />
         </div>

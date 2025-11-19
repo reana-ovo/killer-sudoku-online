@@ -108,9 +108,9 @@ export function createNewGame() {
     // For Killer Sudoku, usually the board is empty, only cages are given.
     const initialBoard = Array.from({ length: 9 }, () => Array(9).fill(0));
     
-    // Initialize notes (9x9 grid of { center: [], corner: [], color: null })
+    // Initialize notes (9x9 grid of { center: [], corner: [], colors: [] })
   const notes = Array(9).fill(null).map(() => 
-    Array(9).fill(null).map(() => ({ center: [], corner: [], color: null }))
+    Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] }))
   );
 
   return {

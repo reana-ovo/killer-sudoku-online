@@ -25,9 +25,9 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                     alignItems: 'center', 
                     justifyContent: 'center',
                     backgroundColor: inputMode === 'color' ? [
-                        '#fca5a5', '#fdba74', '#fcd34d', 
-                        '#86efac', '#67e8f9', '#93c5fd', 
-                        '#c4b5fd', '#f0abfc', '#fda4af'
+                        '#fecaca', '#fed7aa', '#fde68a', 
+                        '#bbf7d0', '#a5f3fc', '#bfdbfe', 
+                        '#ddd6fe', '#f5d0fe', '#e5e7eb'
                     ][num - 1] : undefined,
                     color: inputMode === 'color' ? 'transparent' : undefined,
                     border: inputMode === 'color' ? '2px solid var(--border)' : undefined
@@ -62,9 +62,9 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                     alignItems: 'center', 
                     justifyContent: 'center',
                     backgroundColor: inputMode === 'color' ? [
-                        '#fca5a5', '#fdba74', '#fcd34d', 
-                        '#86efac', '#67e8f9', '#93c5fd', 
-                        '#c4b5fd', '#f0abfc', '#fda4af'
+                        '#fecaca', '#fed7aa', '#fde68a', 
+                        '#bbf7d0', '#a5f3fc', '#bfdbfe', 
+                        '#ddd6fe', '#f5d0fe', '#e5e7eb'
                     ][num - 1] : undefined,
                     color: inputMode === 'color' ? 'transparent' : undefined,
                     border: inputMode === 'color' ? '2px solid var(--border)' : undefined
@@ -99,9 +99,9 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                     alignItems: 'center', 
                     justifyContent: 'center',
                     backgroundColor: inputMode === 'color' ? [
-                        '#fca5a5', '#fdba74', '#fcd34d', 
-                        '#86efac', '#67e8f9', '#93c5fd', 
-                        '#c4b5fd', '#f0abfc', '#fda4af'
+                        '#fecaca', '#fed7aa', '#fde68a', 
+                        '#bbf7d0', '#a5f3fc', '#bfdbfe', 
+                        '#ddd6fe', '#f5d0fe', '#e5e7eb'
                     ][num - 1] : undefined,
                     color: inputMode === 'color' ? 'transparent' : undefined,
                     border: inputMode === 'color' ? '2px solid var(--border)' : undefined

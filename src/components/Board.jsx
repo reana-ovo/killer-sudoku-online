@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-export default function Board({ gameState, onCellClick, selectedCell, cages }) {
+export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCells, cages }) {
   if (!gameState) return <div className="glass-panel">Loading Board...</div>;
 
   const { board } = gameState;
@@ -49,7 +49,7 @@ export default function Board({ gameState, onCellClick, selectedCell, cages }) {
           const cageStyle = getCageBorders(r, c, cageInfo);
           
           // Check if cell is selected
-          const isSelected = selectedCell && selectedCell.r === r && selectedCell.c === c;
+          const isSelected = selectedCells.has(`${r}-${c}`);
 
           // Grid borders (thicker every 3 cells)
           const borderRight = (c + 1) % 3 === 0 && c !== 8 ? '2px solid var(--foreground)' : '1.5px solid var(--grid-line)';
@@ -58,13 +58,47 @@ export default function Board({ gameState, onCellClick, selectedCell, cages }) {
           // Show sum only in the top-left-most cell of the cage
           const showSum = cageInfo && cageInfo.cells[0].r === r && cageInfo.cells[0].c === c;
 
-          const cellColor = gameState.notes && gameState.notes[r][c].color;
-          const backgroundColor = cellColor || 'transparent';
+          const cellColors = gameState.notes && gameState.notes[r][c].colors;
+          
+          // Sort colors to ensure consistent order
+          const sortedColors = cellColors && cellColors.length > 0 
+            ? [...cellColors].sort() 
+            : cellColors;
+          
+          // Generate background style based on number of colors
+          const getBackgroundStyle = () => {
+            if (!sortedColors || sortedColors.length === 0) {
+              return 'transparent';
+            }
+            
+            if (sortedColors.length === 1) {
+              // Single color: solid background
+              return sortedColors[0];
+            }
+            
+            if (sortedColors.length === 2) {
+              // Two colors: diagonal split (slightly tilted)
+              return `linear-gradient(120deg, ${sortedColors[0]} 0%, ${sortedColors[0]} 50%, ${sortedColors[1]} 50%, ${sortedColors[1]} 100%)`;
+            }
+            
+            // Three or more colors: pie chart style
+            const anglePerColor = 360 / sortedColors.length;
+            const stops = sortedColors.map((color, index) => {
+              const startAngle = index * anglePerColor;
+              const endAngle = (index + 1) * anglePerColor;
+              return `${color} ${startAngle}deg ${endAngle}deg`;
+            });
+            
+            return `conic-gradient(${stops.join(', ')})`;
+          };
+
+          const backgroundColor = getBackgroundStyle();
 
           return (
             <div
               key={`${r}-${c}`}
-              onClick={() => onCellClick(r, c)}
+              onMouseDown={(e) => onMouseDown(r, c, e)}
+              onMouseEnter={() => onMouseEnter(r, c)}
               style={{
                 position: 'relative',
                 borderRight: borderRight,
@@ -75,11 +109,11 @@ export default function Board({ gameState, onCellClick, selectedCell, cages }) {
                 fontSize: 'clamp(1rem, 2.5vw, 2rem)', // Responsive font size
                 fontWeight: 'bold',
                 cursor: 'pointer',
-                backgroundColor: backgroundColor,
+                background: backgroundColor, // Use 'background' instead of 'backgroundColor' to support gradients
                 color: cellValue === 0 ? 'transparent' : '#3b82f6', // Answer: Blue
                 overflow: 'hidden', // Prevent content from expanding cell
                 aspectRatio: '1/1', // Enforce square aspect ratio
-                transition: 'background-color 0.2s ease'
+                transition: 'background 0.2s ease'
               }}
             >
               {/* Cage Border Layer - Inset to create margin and not overlap grid lines */}
@@ -103,7 +137,10 @@ export default function Board({ gameState, onCellClick, selectedCell, cages }) {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      boxShadow: 'inset 0 0 0 3px var(--primary)',
+                      borderTop: (!selectedCells.has(`${r-1}-${c}`)) ? '3px solid var(--primary)' : 'none',
+                      borderRight: (!selectedCells.has(`${r}-${c+1}`)) ? '3px solid var(--primary)' : 'none',
+                      borderBottom: (!selectedCells.has(`${r+1}-${c}`)) ? '3px solid var(--primary)' : 'none',
+                      borderLeft: (!selectedCells.has(`${r}-${c-1}`)) ? '3px solid var(--primary)' : 'none',
                       zIndex: 3,
                       pointerEvents: 'none'
                   }} />
@@ -119,7 +156,7 @@ export default function Board({ gameState, onCellClick, selectedCell, cages }) {
                   lineHeight: 1,
                   fontWeight: 'bold',
                   color: 'var(--cage-text)',
-                  backgroundColor: backgroundColor === 'transparent' ? 'var(--background)' : backgroundColor,
+                  backgroundColor: cellColors && cellColors.length > 0 ? cellColors[0] : 'var(--background)',
                   padding: '0 2px',
                   zIndex: 2,
                   pointerEvents: 'none'

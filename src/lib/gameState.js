@@ -4,8 +4,8 @@ import { supabase } from './supabaseClient';
 const isSupabaseConfigured = 
   process.env.NEXT_PUBLIC_SUPABASE_URL && 
   process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder-project.supabase.co' &&
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY !== 'placeholder-key';
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY &&
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY !== 'placeholder-key';
 
 export function useGameState(roomId, initialGameData) {
   const [gameState, setGameState] = useState(initialGameData);
@@ -101,7 +101,7 @@ export function useGameState(roomId, initialGameData) {
   const updateNotes = async (row, col, type, value) => {
       const currentNotes = gameState?.notes || stateRef.current?.notes;
       // If notes don't exist (old game), initialize them
-      let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [] })));
+      let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
       
       newNotes[row] = [...newNotes[row]];
       const cellNotes = { ...newNotes[row][col] };
@@ -119,24 +119,19 @@ export function useGameState(roomId, initialGameData) {
               cellNotes.corner = [...cellNotes.corner, value].sort();
           }
       } else if (type === 'color') {
-          // Toggle color: if same color, remove it.
-          // We map numbers 1-9 to specific colors.
+          // Toggle color: add if not present, remove if present
           const colors = [
-              '#fca5a5', // 1: Red
-              '#fdba74', // 2: Orange
-              '#fcd34d', // 3: Amber
-              '#86efac', // 4: Green
-              '#67e8f9', // 5: Cyan
-              '#93c5fd', // 6: Blue
-              '#c4b5fd', // 7: Violet
-              '#f0abfc', // 8: Fuchsia
-              '#fda4af'  // 9: Rose
+              '#fecaca', '#fed7aa', '#fde68a',
+              '#bbf7d0', '#a5f3fc', '#bfdbfe',
+              '#ddd6fe', '#f5d0fe', '#e5e7eb'
           ];
           const newColor = colors[value - 1];
-          if (cellNotes.color === newColor) {
-              cellNotes.color = null;
+          const colorArray = cellNotes.colors || [];
+          
+          if (colorArray.includes(newColor)) {
+              cellNotes.colors = colorArray.filter(c => c !== newColor);
           } else {
-              cellNotes.color = newColor;
+              cellNotes.colors = [...colorArray, newColor];
           }
       }
 
@@ -171,7 +166,7 @@ export function useGameState(roomId, initialGameData) {
       } else if (mode === 'corner') {
           cellNotes.corner = [];
       } else if (mode === 'color') {
-          cellNotes.color = null;
+          cellNotes.colors = [];
       }
 
       newNotes[row][col] = cellNotes;
@@ -192,13 +187,140 @@ export function useGameState(roomId, initialGameData) {
     }
   };
 
+  // Batch update for multiple cells (for multi-selection)
+  const updateCellsBatch = async (updates) => {
+    const currentBoard = gameState?.board || stateRef.current?.board;
+    if (!currentBoard) return;
+
+    const newBoard = currentBoard.map(row => [...row]);
+    updates.forEach(({ row, col, value }) => {
+      newBoard[row][col] = value;
+    });
+
+    const newGameState = { ...(gameState || stateRef.current), board: newBoard };
+    setGameState(newGameState);
+    stateRef.current = newGameState;
+
+    if (!isOffline && isSupabaseConfigured) {
+      try {
+        await supabase
+          .from('games')
+          .update({ board_state: newGameState })
+          .eq('id', roomId);
+      } catch (e) {
+        console.error("Failed to sync batch update:", e);
+      }
+    }
+  };
+
+  // Batch update for notes (for multi-selection)
+  const updateNotesBatch = async (updates) => {
+    const currentNotes = gameState?.notes || stateRef.current?.notes;
+    let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
+
+    newNotes = newNotes.map(row => row.map(cell => ({ ...cell })));
+
+    updates.forEach(({ row, col, type, value, shouldRemove }) => {
+      const cellNotes = newNotes[row][col];
+
+      if (type === 'center') {
+        if (shouldRemove) {
+          // Remove the note
+          cellNotes.center = cellNotes.center.filter(v => v !== value);
+        } else {
+          // Add the note if not present
+          if (!cellNotes.center.includes(value)) {
+            cellNotes.center = [...cellNotes.center, value].sort();
+          }
+        }
+      } else if (type === 'corner') {
+        if (shouldRemove) {
+          // Remove the note
+          cellNotes.corner = cellNotes.corner.filter(v => v !== value);
+        } else {
+          // Add the note if not present
+          if (!cellNotes.corner.includes(value)) {
+            cellNotes.corner = [...cellNotes.corner, value].sort();
+          }
+        }
+      } else if (type === 'color') {
+        const colors = [
+          '#fecaca', '#fed7aa', '#fde68a',
+          '#bbf7d0', '#a5f3fc', '#bfdbfe',
+          '#ddd6fe', '#f5d0fe', '#e5e7eb'
+        ];
+        const newColor = colors[value - 1];
+        const colorArray = cellNotes.colors || [];
+        
+        if (shouldRemove) {
+          // Remove the color
+          cellNotes.colors = colorArray.filter(c => c !== newColor);
+        } else {
+          // Add the color if not present
+          if (!colorArray.includes(newColor)) {
+            cellNotes.colors = [...colorArray, newColor];
+          }
+        }
+      }
+    });
+
+    const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+    setGameState(newGameState);
+    stateRef.current = newGameState;
+
+    if (!isOffline && isSupabaseConfigured) {
+      try {
+        await supabase
+          .from('games')
+          .update({ board_state: newGameState })
+          .eq('id', roomId);
+      } catch (e) {
+        console.error("Failed to sync batch update:", e);
+      }
+    }
+  };
+
+  // Batch clear for mode content (for multi-selection delete)
+  const clearModeContentBatch = async (updates) => {
+    const currentNotes = gameState?.notes || stateRef.current?.notes;
+    if (!currentNotes) return;
+
+    let newNotes = currentNotes.map(row => row.map(cell => ({ ...cell })));
+
+    updates.forEach(({ row, col, mode }) => {
+      const cellNotes = newNotes[row][col];
+      if (mode === 'center') {
+        cellNotes.center = [];
+      } else if (mode === 'corner') {
+        cellNotes.corner = [];
+      } else if (mode === 'color') {
+        cellNotes.colors = [];
+      }
+    });
+
+    const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+    setGameState(newGameState);
+    stateRef.current = newGameState;
+
+    if (!isOffline && isSupabaseConfigured) {
+      try {
+        await supabase
+          .from('games')
+          .update({ board_state: newGameState })
+          .eq('id', roomId);
+      } catch (e) {
+        console.error("Failed to sync batch update:", e);
+      }
+    }
+  };
+
   const clearNotes = async (row, col) => {
       const currentNotes = gameState?.notes || stateRef.current?.notes;
       if (!currentNotes) return;
 
       let newNotes = [...currentNotes];
       newNotes[row] = [...newNotes[row]];
-      newNotes[row][col] = { center: [], corner: [], color: null };
+      newNotes[row][col] = { center: [], corner: [], colors: [] };
 
       const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
       setGameState(newGameState);
@@ -222,5 +344,17 @@ export function useGameState(roomId, initialGameData) {
       stateRef.current = newState;
   };
 
-  return { gameState, loading, updateCell, updateNotes, clearNotes, clearModeContent, isOffline, setLocalGameState };
+  return { 
+    gameState, 
+    loading, 
+    updateCell, 
+    updateCellsBatch,
+    updateNotes, 
+    updateNotesBatch,
+    clearNotes, 
+    clearModeContent,
+    clearModeContentBatch,
+    isOffline, 
+    setLocalGameState 
+  };
 }
