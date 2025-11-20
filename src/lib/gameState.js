@@ -1,337 +1,219 @@
-import { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabaseClient';
+import { useState, useEffect, useCallback } from 'react';
+import * as Y from 'yjs';
+import { useYjsSync } from './useYjsSync';
 
-const isSupabaseConfigured = 
-  process.env.NEXT_PUBLIC_SUPABASE_URL && 
-  process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder-project.supabase.co' &&
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY &&
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY !== 'placeholder-key';
-
-export function useGameState(roomId, initialGameData) {
+export function useGameState(roomId, initialGameData, isMultiplayerEnabled = false) {
   const [gameState, setGameState] = useState(initialGameData);
-  // Initialize loading based on config: if offline, we are ready immediately (unless waiting for something else).
-  // If online, we need to fetch.
-  const [loading, setLoading] = useState(isSupabaseConfigured && !initialGameData);
-  const [isOffline, setIsOffline] = useState(!isSupabaseConfigured);
-  const stateRef = useRef(initialGameData);
+
   
-  // Version tracking for local-first sync
-  const [localVersion, setLocalVersion] = useState(0);
-  const localVersionRef = useRef(0);
-  const pendingUpdateTimer = useRef(null);
+  // Initialize Yjs sync
+  const { 
+    yboard, 
+    ynotes, 
+    ycages, 
+    undoManager, 
+    isConnected, 
+    isSynced,
+    isOffline 
+  } = useYjsSync(roomId, isMultiplayerEnabled);
 
-  // History management for undo/redo
-  // Tracks ALL state changes (local + remote) for accurate undo/redo
-  const [history, setHistory] = useState([initialGameData]);
-  const [historyIndex, setHistoryIndex] = useState(0);
-  const maxHistorySize = 50;
-  const isUndoRedoAction = useRef(false); // Flag to prevent adding history during undo/redo
-
-  // Helper to add state to history
-  const pushToHistory = useRef((newState) => {
-    // Don't add to history if this is an undo/redo action
-    if (isUndoRedoAction.current) return;
-
-    setHistory(prev => {
-      // Truncate future history if we're not at the end
-      const newHistory = prev.slice(0, historyIndex + 1);
-      
-      // Add new state
-      newHistory.push(newState);
-      
-      // Limit history size
-      if (newHistory.length > maxHistorySize) {
-        newHistory.shift();
-        // Adjust index since we removed first element
-        setHistoryIndex(maxHistorySize - 1);
-      } else {
-        setHistoryIndex(newHistory.length - 1);
-      }
-      
-      return newHistory;
-    });
-  }).current;
-
-  // Debounced Supabase sync (300ms delay to batch rapid changes)
-  const syncToSupabase = useRef((newState, version) => {
-    if (!isSupabaseConfigured || isOffline) return;
-    
-    // Clear any pending update
-    if (pendingUpdateTimer.current) {
-      clearTimeout(pendingUpdateTimer.current);
-    }
-    
-    // Schedule new update
-    pendingUpdateTimer.current = setTimeout(async () => {
-      try {
-        await supabase
-          .from('games')
-          .update({ 
-            board_state: { ...newState, version, lastModified: Date.now() }
-          })
-          .eq('id', roomId);
-      } catch (e) {
-        console.error("Failed to sync update:", e);
-      }
-    }, 300);
-  }).current;
-
+  // Initialize Yjs document with game data (only once)
   useEffect(() => {
-    if (!roomId) return;
+    if (!initialGameData || yboard.length > 0) return;
 
-    // If offline or not configured, we just use local state
-    if (!isSupabaseConfigured) {
-        return;
-    }
+    console.log('Initializing Yjs document with game data', { 
+      hasInitialData: !!initialGameData, 
+      yboardLength: yboard.length 
+    });
+    
+    // Use Y.Doc transaction for atomic updates
+    yboard.doc.transact(() => {
+      // Initialize board
+      initialGameData.board.forEach((row) => {
+        const yRow = new Y.Array();
+        row.forEach(cell => yRow.push([cell]));
+        yboard.push([yRow]);
+      });
 
-    // Fetch initial state from Supabase
-    const fetchGame = async () => {
-      try {
-        const { data, error } = await supabase
-            .from('games')
-            .select('board_state')
-            .eq('id', roomId)
-            .single();
-
-        if (data) {
-            setGameState(data.board_state);
-            stateRef.current = data.board_state;
-        } else if (error) {
-            console.error("Error fetching game:", error);
-            // Fallback to offline if fetch fails
-            setIsOffline(true);
-        }
-      } catch (e) {
-          console.error("Exception fetching game:", e);
-          setIsOffline(true);
+      // Initialize notes
+      if (initialGameData.notes) {
+        const notesData = {};
+        initialGameData.notes.forEach((row, r) => {
+          row.forEach((cell, c) => {
+            const key = `${r}-${c}`;
+            notesData[key] = cell;
+          });
+        });
+        ynotes.set('data', notesData);
       }
-      setLoading(false);
+
+      // Initialize cages
+      if (initialGameData.cages) {
+        initialGameData.cages.forEach(cage => {
+          ycages.push([cage]);
+        });
+      }
+    }, 'init');
+
+
+
+  }, [initialGameData, yboard, ynotes, ycages]);
+
+  // Observe Yjs changes and update React state
+  useEffect(() => {
+    const updateGameState = () => {
+      // Convert Yjs arrays/maps back to plain JavaScript
+      const board = [];
+      yboard.forEach(yRow => {
+        const row = [];
+        yRow.forEach(cell => row.push(cell));
+        board.push(row);
+      });
+
+      // Convert notes map back to 2D array
+      const notesData = ynotes.get('data') || {};
+      const notes = Array(9).fill(null).map(() => 
+        Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] }))
+      );
+      
+      Object.entries(notesData).forEach(([key, value]) => {
+        const [r, c] = key.split('-').map(Number);
+        notes[r][c] = value;
+      });
+
+      // Convert cages
+      const cages = [];
+      ycages.forEach(cage => cages.push(cage));
+
+      setGameState({
+        board,
+        notes,
+        cages
+      });
     };
 
-    fetchGame();
+    // Initial update
+    if (yboard.length > 0) {
+      updateGameState();
+    }
 
-    // Subscribe to changes
-    const channel = supabase
-      .channel(`game:${roomId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'games',
-          filter: `id=eq.${roomId}`,
-        },
-        (payload) => {
-          const newState = payload.new.board_state;
-          const remoteVersion = newState?.version || 0;
-          
-          // Only update if remote version is newer than local
-          // This prevents stale updates from overwriting optimistic local changes
-          if (remoteVersion > localVersionRef.current) {
-            setGameState(newState);
-            stateRef.current = newState;
-            // Add remote changes to history (tracks both local AND remote for accurate undo/redo)
-            pushToHistory(newState);
-            // Don't update localVersion - it only increments on local changes
-          }
-        }
-      )
-      .subscribe();
+    // Observe changes
+    const boardObserver = () => updateGameState();
+    const notesObserver = () => updateGameState();
+    const cagesObserver = () => updateGameState();
+
+    yboard.observeDeep(boardObserver);
+    ynotes.observe(notesObserver);
+    ycages.observe(cagesObserver);
 
     return () => {
-      supabase.removeChannel(channel);
+      yboard.unobserveDeep(boardObserver);
+      ynotes.unobserve(notesObserver);
+      ycages.unobserve(cagesObserver);
     };
-  }, [roomId]); // Removed initialGameData dependency to avoid loop, handled in separate effect
+  }, [yboard, ynotes, ycages]);
 
-  const updateCell = (row, col, value) => {
-    const currentBoard = gameState?.board || stateRef.current?.board;
-    if (!currentBoard) return;
+  // Update functions - modify Yjs structures (automatic sync!)
+  const updateCell = useCallback((row, col, value) => {
+    const yRow = yboard.get(row);
+    if (yRow) {
+      yRow.delete(col, 1);
+      yRow.insert(col, [value]);
+    }
+  }, [yboard]);
 
-    // Increment local version
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    // Apply change optimistically
-    const newBoard = [...currentBoard];
-    newBoard[row] = [...newBoard[row]];
-    newBoard[row][col] = value;
-
-    const newGameState = { 
-      ...(gameState || stateRef.current), 
-      board: newBoard,
-      version: newVersion,
-      lastModified: Date.now()
-    };
+  const updateNotes = useCallback((row, col, type, value) => {
+    const notesData = ynotes.get('data') || {};
+    const key = `${row}-${col}`;
+    const cellNotes = notesData[key] || { center: [], corner: [], colors: [] };
     
-    setGameState(newGameState);
-    stateRef.current = newGameState;
-
-    // Add to history for undo/redo
-    pushToHistory(newGameState);
-
-    // Debounced sync to Supabase
-    syncToSupabase(newGameState, newVersion);
-  };
-
-  const updateNotes = (row, col, type, value) => {
-      const currentNotes = gameState?.notes || stateRef.current?.notes;
-      // If notes don't exist (old game), initialize them
-      let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
-      
-      // Increment local version
-      const newVersion = localVersionRef.current + 1;
-      localVersionRef.current = newVersion;
-      setLocalVersion(newVersion);
-      
-      newNotes[row] = [...newNotes[row]];
-      const cellNotes = { ...newNotes[row][col] };
-      
-      if (type === 'center') {
-          if (cellNotes.center.includes(value)) {
-              cellNotes.center = cellNotes.center.filter(v => v !== value);
-          } else {
-              cellNotes.center = [...cellNotes.center, value].sort();
-          }
-      } else if (type === 'corner') {
-          if (cellNotes.corner.includes(value)) {
-              cellNotes.corner = cellNotes.corner.filter(v => v !== value);
-          } else {
-              cellNotes.corner = [...cellNotes.corner, value].sort();
-          }
-      } else if (type === 'color') {
-          // Toggle color: add if not present, remove if present
-          const colors = [
-              '#fecaca', '#fed7aa', '#fde68a',
-              '#bbf7d0', '#a5f3fc', '#bfdbfe',
-              '#ddd6fe', '#f5d0fe', '#e5e7eb'
-          ];
-          const newColor = colors[value - 1];
-          const colorArray = cellNotes.colors || [];
-          
-          if (colorArray.includes(newColor)) {
-              cellNotes.colors = colorArray.filter(c => c !== newColor);
-          } else {
-              cellNotes.colors = [...colorArray, newColor];
-          }
+    if (type === 'center') {
+      if (cellNotes.center.includes(value)) {
+        cellNotes.center = cellNotes.center.filter(v => v !== value);
+      } else {
+        cellNotes.center = [...cellNotes.center, value].sort();
       }
-
-      newNotes[row][col] = cellNotes;
-
-      const newGameState = { 
-        ...(gameState || stateRef.current), 
-        notes: newNotes,
-        version: newVersion,
-        lastModified: Date.now()
-      };
-      
-      setGameState(newGameState);
-      stateRef.current = newGameState;
-
-      // Add to history for undo/redo
-      pushToHistory(newGameState);
-
-      // Debounced sync to Supabase
-      syncToSupabase(newGameState, newVersion);
-  };
-
-  const clearModeContent = (row, col, mode) => {
-      const currentNotes = gameState?.notes || stateRef.current?.notes;
-      if (!currentNotes) return;
-
-      const newVersion = localVersionRef.current + 1;
-      localVersionRef.current = newVersion;
-      setLocalVersion(newVersion);
-
-      let newNotes = [...currentNotes];
-      newNotes[row] = [...newNotes[row]];
-      const cellNotes = { ...newNotes[row][col] };
-
-      if (mode === 'center') {
-          cellNotes.center = [];
-      } else if (mode === 'corner') {
-          cellNotes.corner = [];
-      } else if (mode === 'color') {
-          cellNotes.colors = [];
+    } else if (type === 'corner') {
+      if (cellNotes.corner.includes(value)) {
+        cellNotes.corner = cellNotes.corner.filter(v => v !== value);
+      } else {
+        cellNotes.corner = [...cellNotes.corner, value].sort();
       }
+    } else if (type === 'color') {
+      const colors = [
+        '#fecaca', '#fed7aa', '#fde68a',
+        '#bbf7d0', '#a5f3fc', '#bfdbfe',
+        '#ddd6fe', '#f5d0fe', '#e5e7eb'
+      ];
+      const newColor = colors[value - 1];
+      const colorArray = cellNotes.colors || [];
+      
+      if (colorArray.includes(newColor)) {
+        cellNotes.colors = colorArray.filter(c => c !== newColor);
+      } else {
+        cellNotes.colors = [...colorArray, newColor];
+      }
+    }
 
-      newNotes[row][col] = cellNotes;
+    notesData[key] = cellNotes;
+    ynotes.set('data', notesData);
+  }, [ynotes]);
 
-      const newGameState = { 
-        ...(gameState || stateRef.current), 
-        notes: newNotes,
-        version: newVersion,
-        lastModified: Date.now()
-      };
-      setGameState(newGameState);
-      stateRef.current = newGameState;
+  const clearNotes = useCallback((row, col) => {
+    const notesData = ynotes.get('data') || {};
+    const key = `${row}-${col}`;
+    notesData[key] = { center: [], corner: [], colors: [] };
+    ynotes.set('data', notesData);
+  }, [ynotes]);
 
-      pushToHistory(newGameState);
+  const clearModeContent = useCallback((row, col, mode) => {
+    const notesData = ynotes.get('data') || {};
+    const key = `${row}-${col}`;
+    const cellNotes = notesData[key] || { center: [], corner: [], colors: [] };
 
-      syncToSupabase(newGameState, newVersion);
-  };
+    if (mode === 'center') {
+      cellNotes.center = [];
+    } else if (mode === 'corner') {
+      cellNotes.corner = [];
+    } else if (mode === 'color') {
+      cellNotes.colors = [];
+    }
 
-  // Batch update for multiple cells (for multi-selection)
-  const updateCellsBatch = (updates) => {
-    const currentBoard = gameState?.board || stateRef.current?.board;
-    if (!currentBoard) return;
+    notesData[key] = cellNotes;
+    ynotes.set('data', notesData);
+  }, [ynotes]);
 
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    const newBoard = currentBoard.map(row => [...row]);
-    updates.forEach(({ row, col, value }) => {
-      newBoard[row][col] = value;
+  // Batch operations
+  const updateCellsBatch = useCallback((updates) => {
+    yboard.doc.transact(() => {
+      updates.forEach(({ row, col, value }) => {
+        const yRow = yboard.get(row);
+        if (yRow) {
+          yRow.delete(col, 1);
+          yRow.insert(col, [value]);
+        }
+      });
     });
+  }, [yboard]);
 
-    const newGameState = { 
-      ...(gameState || stateRef.current), 
-      board: newBoard,
-      version: newVersion,
-      lastModified: Date.now()
-    };
-    setGameState(newGameState);
-    stateRef.current = newGameState;
-
-    pushToHistory(newGameState);
-
-    syncToSupabase(newGameState, newVersion);
-  };
-
-  // Batch update for notes (for multi-selection)
-  const updateNotesBatch = (updates) => {
-    const currentNotes = gameState?.notes || stateRef.current?.notes;
-    let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
-
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    newNotes = newNotes.map(row => row.map(cell => ({ ...cell })));
-
+  const updateNotesBatch = useCallback((updates) => {
+    const notesData = ynotes.get('data') || {};
+    
     updates.forEach(({ row, col, type, value, shouldRemove }) => {
-      const cellNotes = newNotes[row][col];
+      const key = `${row}-${col}`;
+      const cellNotes = notesData[key] || { center: [], corner: [], colors: [] };
 
       if (type === 'center') {
         if (shouldRemove) {
-          // Remove the note
           cellNotes.center = cellNotes.center.filter(v => v !== value);
-        } else {
-          // Add the note if not present
-          if (!cellNotes.center.includes(value)) {
-            cellNotes.center = [...cellNotes.center, value].sort();
-          }
+        } else if (!cellNotes.center.includes(value)) {
+          cellNotes.center = [...cellNotes.center, value].sort();
         }
       } else if (type === 'corner') {
         if (shouldRemove) {
-          // Remove the note
           cellNotes.corner = cellNotes.corner.filter(v => v !== value);
-        } else {
-          // Add the note if not present
-          if (!cellNotes.corner.includes(value)) {
-            cellNotes.corner = [...cellNotes.corner, value].sort();
-          }
+        } else if (!cellNotes.corner.includes(value)) {
+          cellNotes.corner = [...cellNotes.corner, value].sort();
         }
       } else if (type === 'color') {
         const colors = [
@@ -343,44 +225,25 @@ export function useGameState(roomId, initialGameData) {
         const colorArray = cellNotes.colors || [];
         
         if (shouldRemove) {
-          // Remove the color
           cellNotes.colors = colorArray.filter(c => c !== newColor);
-        } else {
-          // Add the color if not present
-          if (!colorArray.includes(newColor)) {
-            cellNotes.colors = [...colorArray, newColor];
-          }
+        } else if (!colorArray.includes(newColor)) {
+          cellNotes.colors = [...colorArray, newColor];
         }
       }
+
+      notesData[key] = cellNotes;
     });
 
-    const newGameState = { 
-      ...(gameState || stateRef.current), 
-      notes: newNotes,
-      version: newVersion,
-      lastModified: Date.now()
-    };
-    setGameState(newGameState);
-    stateRef.current = newGameState;
+    ynotes.set('data', notesData);
+  }, [ynotes]);
 
-    pushToHistory(newGameState);
-
-    syncToSupabase(newGameState, newVersion);
-  };
-
-  // Batch clear for mode content (for multi-selection delete)
-  const clearModeContentBatch = (updates) => {
-    const currentNotes = gameState?.notes || stateRef.current?.notes;
-    if (!currentNotes) return;
-
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    let newNotes = currentNotes.map(row => row.map(cell => ({ ...cell })));
+  const clearModeContentBatch = useCallback((updates) => {
+    const notesData = ynotes.get('data') || {};
 
     updates.forEach(({ row, col, mode }) => {
-      const cellNotes = newNotes[row][col];
+      const key = `${row}-${col}`;
+      const cellNotes = notesData[key] || { center: [], corner: [], colors: [] };
+      
       if (mode === 'center') {
         cellNotes.center = [];
       } else if (mode === 'corner') {
@@ -388,129 +251,83 @@ export function useGameState(roomId, initialGameData) {
       } else if (mode === 'color') {
         cellNotes.colors = [];
       }
+
+      notesData[key] = cellNotes;
     });
 
-    const newGameState = { 
-      ...(gameState || stateRef.current), 
-      notes: newNotes,
-      version: newVersion,
-      lastModified: Date.now()
-    };
-    setGameState(newGameState);
-    stateRef.current = newGameState;
+    ynotes.set('data', notesData);
+  }, [ynotes]);
 
-    pushToHistory(newGameState);
+  // Undo/Redo using Yjs UndoManager
+  const undo = useCallback(() => {
+    if (undoManager.canUndo()) {
+      undoManager.undo();
+    }
+  }, [undoManager]);
 
-    syncToSupabase(newGameState, newVersion);
-  };
+  const redo = useCallback(() => {
+    if (undoManager.canRedo()) {
+      undoManager.redo();
+    }
+  }, [undoManager]);
 
-  const clearNotes = (row, col) => {
-      const currentNotes = gameState?.notes || stateRef.current?.notes;
-      if (!currentNotes) return;
+  const canUndo = undoManager.canUndo();
+  const canRedo = undoManager.canRedo();
 
-      const newVersion = localVersionRef.current + 1;
-      localVersionRef.current = newVersion;
-      setLocalVersion(newVersion);
+  // Helper to manually set state (for local game generation)
+  const setLocalGameState = useCallback((newState) => {
+    if (!newState) return;
 
-      let newNotes = [...currentNotes];
-      newNotes[row] = [...newNotes[row]];
-      newNotes[row][col] = { center: [], corner: [], colors: [] };
+    yboard.doc.transact(() => {
+      // Clear existing
+      yboard.delete(0, yboard.length);
+      ynotes.clear();
+      ycages.delete(0, ycages.length);
 
-      const newGameState = { 
-        ...(gameState || stateRef.current), 
-        notes: newNotes,
-        version: newVersion,
-        lastModified: Date.now()
-      };
-      setGameState(newGameState);
-      stateRef.current = newGameState;
+      // Set new data
+      newState.board.forEach((row) => {
+        const yRow = new Y.Array();
+        row.forEach(cell => yRow.push([cell]));
+        yboard.push([yRow]);
+      });
 
-      pushToHistory(newGameState);
+      if (newState.notes) {
+        const notesData = {};
+        newState.notes.forEach((row, r) => {
+          row.forEach((cell, c) => {
+            notesData[`${r}-${c}`] = cell;
+          });
+        });
+        ynotes.set('data', notesData);
+      }
 
-      syncToSupabase(newGameState, newVersion);
-  };
+      if (newState.cages) {
+        newState.cages.forEach(cage => ycages.push([cage]));
+      }
+    });
+  }, [yboard, ynotes, ycages]);
 
-  // Undo/Redo functions
-  const undo = () => {
-    if (historyIndex <= 0) return; // Can't undo further
+  const clearUndoHistory = useCallback(() => {
+    undoManager.clear();
+  }, [undoManager]);
 
-    isUndoRedoAction.current = true;
-    const newIndex = historyIndex - 1;
-    const previousState = history[newIndex];
-
-    // Increment version for undo action
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    const stateWithVersion = {
-      ...previousState,
-      version: newVersion,
-      lastModified: Date.now()
-    };
-
-    setGameState(stateWithVersion);
-    stateRef.current = stateWithVersion;
-    setHistoryIndex(newIndex);
-
-    // Sync undo to Supabase
-    syncToSupabase(stateWithVersion, newVersion);
-
-    isUndoRedoAction.current = false;
-  };
-
-  const redo = () => {
-    if (historyIndex >= history.length - 1) return; // Can't redo further
-
-    isUndoRedoAction.current = true;
-    const newIndex = historyIndex + 1;
-    const nextState = history[newIndex];
-
-    // Increment version for redo action
-    const newVersion = localVersionRef.current + 1;
-    localVersionRef.current = newVersion;
-    setLocalVersion(newVersion);
-
-    const stateWithVersion = {
-      ...nextState,
-      version: newVersion,
-      lastModified: Date.now()
-    };
-
-    setGameState(stateWithVersion);
-    stateRef.current = stateWithVersion;
-    setHistoryIndex(newIndex);
-
-    // Sync redo to Supabase
-    syncToSupabase(stateWithVersion, newVersion);
-
-    isUndoRedoAction.current = false;
-  };
-
-  const canUndo = () => historyIndex > 0;
-  const canRedo = () => historyIndex < history.length - 1;
-
-  // Helper to manually set state (e.g. when generating locally)
-  const setLocalGameState = (newState) => {
-      setGameState(newState);
-      stateRef.current = newState;
-  };
-
-  return { 
-    gameState, 
-    loading, 
-    updateCell, 
+  return {
+    gameState,
+    loading: !gameState && (!isMultiplayerEnabled || !isSynced),
+    updateCell,
     updateCellsBatch,
-    updateNotes, 
+    updateNotes,
     updateNotesBatch,
-    clearNotes, 
+    clearNotes,
     clearModeContent,
     clearModeContentBatch,
     undo,
     redo,
-    canUndo: canUndo(),
-    canRedo: canRedo(),
-    isOffline, 
-    setLocalGameState 
+    canUndo,
+    canRedo,
+    clearUndoHistory,
+    isOffline,
+    isConnected,
+    setLocalGameState
   };
 }

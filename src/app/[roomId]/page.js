@@ -14,7 +14,8 @@ export default function GameRoom() {
   const roomId = params.roomId;
   const shouldCreate = searchParams.get('create') === 'true';
   
-  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, undo, redo, canUndo, canRedo, isOffline, setLocalGameState } = useGameState(roomId);
+  const [isMultiplayerEnabled, setIsMultiplayerEnabled] = useState(!shouldCreate);
+  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, undo, redo, canUndo, canRedo, clearUndoHistory, isOffline, isConnected, setLocalGameState } = useGameState(roomId, null, isMultiplayerEnabled);
   const [selectedCells, setSelectedCells] = useState(new Set()); // Set of "r-c" strings
   const [inputMode, setInputMode] = useState('answer'); // 'answer', 'center', 'corner', 'color'
   const [isDragging, setIsDragging] = useState(false);
@@ -24,12 +25,17 @@ export default function GameRoom() {
 
   // Generate game if needed (offline or explicit create)
   useEffect(() => {
-      if (!loading && !gameState && (isOffline || shouldCreate)) {
+      if (!gameState && (!isMultiplayerEnabled || shouldCreate)) {
           console.log("Generating new game locally...");
           const newGame = createNewGame();
           setLocalGameState(newGame);
+          clearUndoHistory();
+          
+          // Remove ?create=true from URL to prevent resetting to offline on refresh
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, '', newUrl);
       }
-  }, [loading, gameState, isOffline, shouldCreate, setLocalGameState]);
+  }, [gameState, isMultiplayerEnabled, shouldCreate, setLocalGameState, clearUndoHistory]);
 
   const handleMouseDown = (r, c, e) => {
       const cellKey = `${r}-${c}`;
@@ -230,7 +236,7 @@ export default function GameRoom() {
     alert('Link copied to clipboard!');
   };
 
-  if (loading) {
+  if (loading || (shouldCreate && !gameState)) {
     return (
       <main className="container">
         <div className="glass-panel">
@@ -257,7 +263,9 @@ export default function GameRoom() {
       <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
         <h1>Killer Sudoku</h1>
         <p style={{ marginBottom: '0.5rem' }}>Room: {roomId.slice(0, 8)}...</p>
-        {isOffline && <span style={{ color: 'orange', fontSize: '0.8rem' }}>Offline Mode</span>}
+        {!isMultiplayerEnabled && <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Local Mode</span>}
+        {isMultiplayerEnabled && !gameState && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>Connecting...</span>}
+        {isOffline && <span style={{ color: 'orange', fontSize: '0.8rem' }}> (Offline - No Config)</span>}
       </div>
 
       <div style={{ 
@@ -280,8 +288,8 @@ export default function GameRoom() {
           />
         </div>
 
-        {/* Controls Container - Takes up less space */}
-        <div style={{ flex: '1 1 18.75rem', maxWidth: '25rem' }}>
+        {/* Controls Container */}
+        <div style={{ flex: '0 1 auto', maxWidth: '100%' }}>
           <Controls 
             onNumberClick={handleNumberClick} 
             onDelete={handleDelete} 
@@ -295,6 +303,9 @@ export default function GameRoom() {
             onRedo={redo}
             canUndo={canUndo}
             canRedo={canRedo}
+            isMultiplayerEnabled={isMultiplayerEnabled}
+            onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
+            isConnected={gameState ? isConnected : false}
           />
           
           {/* Rules Modal */}

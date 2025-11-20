@@ -3,6 +3,25 @@
 import React from 'react';
 
 export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCells, cages }) {
+  // Extract board and notes safely
+  const board = gameState?.board;
+  const notes = gameState?.notes;
+
+  // Early return if board isn't loaded yet
+  if (!board) {
+    return (
+      <div className="glass-panel" style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        aspectRatio: '1',
+        width: '100%'
+      }}>
+        <p>加载中...</p>
+      </div>
+    );
+  }
+
   // Touch handling
   const handleTouchStart = (r, c, e) => {
     // Prevent default to stop scrolling/zooming while selecting
@@ -27,10 +46,6 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
       }
     }
   };
-
-  if (!gameState) return <div className="glass-panel">Loading Board...</div>;
-
-  const { board } = gameState;
 
   // Helper to get cage info for a cell
   const getCageInfo = (r, c) => {
@@ -213,7 +228,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
           // Show sum only in the top-left-most cell of the cage
           const showSum = cageInfo && cageInfo.cells[0].r === r && cageInfo.cells[0].c === c;
 
-          const cellColors = gameState.notes && gameState.notes[r][c].colors;
+          const cellColors = gameState.notes?.[r]?.[c]?.colors;
           
           // Sort colors to ensure consistent order
           const sortedColors = cellColors && cellColors.length > 0 

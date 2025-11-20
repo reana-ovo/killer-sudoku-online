@@ -2,26 +2,33 @@
 
 import React from 'react';
 
-export default function Controls({ onNumberClick, onDelete, onRegenerate, onShare, inputMode, onModeChange, isMultiSelectActive, onMultiSelectToggle, onShowRules, onUndo, onRedo, canUndo, canRedo }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem', width: '100%', maxWidth: '18.75rem' }}>
+export default function Controls({ onNumberClick, onDelete, onRegenerate, onShare, inputMode, onModeChange, isMultiSelectActive, onMultiSelectToggle, onShowRules, onUndo, onRedo, canUndo, canRedo, isMultiplayerEnabled, onToggleMultiplayer, isConnected }) {
+  const [showShareModal, setShowShareModal] = React.useState(false);
 
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <button 
-            className="btn btn-secondary" 
-            onClick={onShowRules}
-            style={{ flex: '0 0 auto', padding: '0 1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            title="How to Play"
-        >
-            ?
-        </button>
+  const handleMultiplayerClick = () => {
+    setShowShareModal(true);
+    if (!isMultiplayerEnabled) {
+      onToggleMultiplayer();
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem', width: '100%', maxWidth: '100%' }}>
+
+      {/* Top utility buttons - horizontal on desktop, vertical on mobile */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: '0.5rem'
+      }}>
+        {/* Undo */}
         <button 
             className="btn btn-secondary" 
             onClick={onUndo}
             disabled={!canUndo}
             style={{ 
-              flex: '0 0 auto', 
-              padding: '0 0.75rem', 
+              padding: '0', 
+              aspectRatio: '1',
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
@@ -30,15 +37,20 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             }}
             title="Undo (Ctrl+Z)"
         >
-            ↶
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7v6h6" />
+                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+            </svg>
         </button>
+
+        {/* Redo */}
         <button 
             className="btn btn-secondary" 
             onClick={onRedo}
             disabled={!canRedo}
             style={{ 
-              flex: '0 0 auto',
-              padding: '0 0.75rem', 
+              padding: '0', 
+              aspectRatio: '1',
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
@@ -47,12 +59,135 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             }}
             title="Redo (Ctrl+Shift+Z)"
         >
-            ↷
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 7v6h-6" />
+                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+            </svg>
         </button>
-        <button className="btn" style={{ flex: '1' }} onClick={onShare}>
-            Share Link
+
+        {/* Multiplayer */}
+        <button 
+            className={`btn ${isMultiplayerEnabled ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={handleMultiplayerClick}
+            style={{ 
+                padding: '0', 
+                aspectRatio: '1', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                backgroundColor: isMultiplayerEnabled ? 'var(--primary)' : undefined,
+                color: isMultiplayerEnabled ? 'white' : undefined
+            }}
+            title={isMultiplayerEnabled ? "Share Game" : "Enable Multiplayer"}
+        >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+        </button>
+
+        {/* Help/Rules */}
+        <button 
+            className="btn btn-secondary" 
+            onClick={onShowRules}
+            style={{ 
+                padding: '0', 
+                aspectRatio: '1', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+            }}
+            title="How to Play"
+        >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <path d="M12 17h.01" />
+            </svg>
         </button>
       </div>
+
+      {/* Multiplayer Share Modal */}
+      {showShareModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}
+        onClick={() => setShowShareModal(false)}
+        >
+          <div className="glass-panel" style={{
+            padding: '2rem',
+            maxWidth: '25rem',
+            width: '90%',
+            position: 'relative'
+          }}
+          onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              onClick={() => setShowShareModal(false)}
+              style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
+                background: 'none',
+                border: 'none',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+                color: 'var(--foreground)'
+              }}
+            >
+              ×
+            </button>
+            <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>
+              {isConnected ? 'Invite Players' : 'Creating Room...'}
+            </h2>
+            <p style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+              {isConnected 
+                ? 'Share this link to play with others in real-time.' 
+                : 'Please wait while we connect to the server...'}
+            </p>
+            
+            {!isConnected ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem' }}>
+                <div className="spinner" style={{
+                  width: '2rem',
+                  height: '2rem',
+                  border: '3px solid var(--border)',
+                  borderTopColor: 'var(--primary)',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite'
+                }} />
+                <style jsx>{`
+                  @keyframes spin {
+                    to { transform: rotate(360deg); }
+                  }
+                `}</style>
+              </div>
+            ) : (
+              <button 
+                className="btn" 
+                style={{ width: '100%' }} 
+                onClick={() => {
+                  onShare();
+                  setShowShareModal(false);
+                }}
+              >
+                Copy Link
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
         
