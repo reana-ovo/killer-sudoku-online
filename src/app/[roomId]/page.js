@@ -14,7 +14,7 @@ export default function GameRoom() {
   const roomId = params.roomId;
   const shouldCreate = searchParams.get('create') === 'true';
   
-  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, isOffline, setLocalGameState } = useGameState(roomId);
+  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, undo, redo, canUndo, canRedo, isOffline, setLocalGameState } = useGameState(roomId);
   const [selectedCells, setSelectedCells] = useState(new Set()); // Set of "r-c" strings
   const [inputMode, setInputMode] = useState('answer'); // 'answer', 'center', 'corner', 'color'
   const [isDragging, setIsDragging] = useState(false);
@@ -186,7 +186,18 @@ export default function GameRoom() {
     const handleKeyDown = (e) => {
       if (selectedCells.size === 0) return;
       
-      // Arrow keys only work with single cell selection
+      // Undo/Redo shortcuts
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
+
+      // Arrow key navigation
       if (selectedCells.size === 1) {
           const [r, c] = [...selectedCells][0].split('-').map(Number);
           let newR = r, newC = c;
@@ -280,6 +291,10 @@ export default function GameRoom() {
             isMultiSelectActive={isMultiSelectActive}
             onMultiSelectToggle={() => setIsMultiSelectActive(prev => !prev)}
             onShowRules={() => setShowRules(true)}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
           />
           
           {/* Rules Modal */}

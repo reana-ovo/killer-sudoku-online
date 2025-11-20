@@ -20,6 +20,38 @@ export function useGameState(roomId, initialGameData) {
   const localVersionRef = useRef(0);
   const pendingUpdateTimer = useRef(null);
 
+  // History management for undo/redo
+  // Tracks ALL state changes (local + remote) for accurate undo/redo
+  const [history, setHistory] = useState([initialGameData]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const maxHistorySize = 50;
+  const isUndoRedoAction = useRef(false); // Flag to prevent adding history during undo/redo
+
+  // Helper to add state to history
+  const pushToHistory = useRef((newState) => {
+    // Don't add to history if this is an undo/redo action
+    if (isUndoRedoAction.current) return;
+
+    setHistory(prev => {
+      // Truncate future history if we're not at the end
+      const newHistory = prev.slice(0, historyIndex + 1);
+      
+      // Add new state
+      newHistory.push(newState);
+      
+      // Limit history size
+      if (newHistory.length > maxHistorySize) {
+        newHistory.shift();
+        // Adjust index since we removed first element
+        setHistoryIndex(maxHistorySize - 1);
+      } else {
+        setHistoryIndex(newHistory.length - 1);
+      }
+      
+      return newHistory;
+    });
+  }).current;
+
   // Debounced Supabase sync (300ms delay to batch rapid changes)
   const syncToSupabase = useRef((newState, version) => {
     if (!isSupabaseConfigured || isOffline) return;
@@ -98,6 +130,8 @@ export function useGameState(roomId, initialGameData) {
           if (remoteVersion > localVersionRef.current) {
             setGameState(newState);
             stateRef.current = newState;
+            // Add remote changes to history (tracks both local AND remote for accurate undo/redo)
+            pushToHistory(newState);
             // Don't update localVersion - it only increments on local changes
           }
         }
@@ -132,6 +166,9 @@ export function useGameState(roomId, initialGameData) {
     
     setGameState(newGameState);
     stateRef.current = newGameState;
+
+    // Add to history for undo/redo
+    pushToHistory(newGameState);
 
     // Debounced sync to Supabase
     syncToSupabase(newGameState, newVersion);
@@ -191,6 +228,9 @@ export function useGameState(roomId, initialGameData) {
       setGameState(newGameState);
       stateRef.current = newGameState;
 
+      // Add to history for undo/redo
+      pushToHistory(newGameState);
+
       // Debounced sync to Supabase
       syncToSupabase(newGameState, newVersion);
   };
@@ -226,6 +266,8 @@ export function useGameState(roomId, initialGameData) {
       setGameState(newGameState);
       stateRef.current = newGameState;
 
+      pushToHistory(newGameState);
+
       syncToSupabase(newGameState, newVersion);
   };
 
@@ -251,6 +293,8 @@ export function useGameState(roomId, initialGameData) {
     };
     setGameState(newGameState);
     stateRef.current = newGameState;
+
+    pushToHistory(newGameState);
 
     syncToSupabase(newGameState, newVersion);
   };
@@ -319,6 +363,8 @@ export function useGameState(roomId, initialGameData) {
     setGameState(newGameState);
     stateRef.current = newGameState;
 
+    pushToHistory(newGameState);
+
     syncToSupabase(newGameState, newVersion);
   };
 
@@ -353,6 +399,8 @@ export function useGameState(roomId, initialGameData) {
     setGameState(newGameState);
     stateRef.current = newGameState;
 
+    pushToHistory(newGameState);
+
     syncToSupabase(newGameState, newVersion);
   };
 
@@ -377,8 +425,70 @@ export function useGameState(roomId, initialGameData) {
       setGameState(newGameState);
       stateRef.current = newGameState;
 
+      pushToHistory(newGameState);
+
       syncToSupabase(newGameState, newVersion);
   };
+
+  // Undo/Redo functions
+  const undo = () => {
+    if (historyIndex <= 0) return; // Can't undo further
+
+    isUndoRedoAction.current = true;
+    const newIndex = historyIndex - 1;
+    const previousState = history[newIndex];
+
+    // Increment version for undo action
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
+
+    const stateWithVersion = {
+      ...previousState,
+      version: newVersion,
+      lastModified: Date.now()
+    };
+
+    setGameState(stateWithVersion);
+    stateRef.current = stateWithVersion;
+    setHistoryIndex(newIndex);
+
+    // Sync undo to Supabase
+    syncToSupabase(stateWithVersion, newVersion);
+
+    isUndoRedoAction.current = false;
+  };
+
+  const redo = () => {
+    if (historyIndex >= history.length - 1) return; // Can't redo further
+
+    isUndoRedoAction.current = true;
+    const newIndex = historyIndex + 1;
+    const nextState = history[newIndex];
+
+    // Increment version for redo action
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
+
+    const stateWithVersion = {
+      ...nextState,
+      version: newVersion,
+      lastModified: Date.now()
+    };
+
+    setGameState(stateWithVersion);
+    stateRef.current = stateWithVersion;
+    setHistoryIndex(newIndex);
+
+    // Sync redo to Supabase
+    syncToSupabase(stateWithVersion, newVersion);
+
+    isUndoRedoAction.current = false;
+  };
+
+  const canUndo = () => historyIndex > 0;
+  const canRedo = () => historyIndex < history.length - 1;
 
   // Helper to manually set state (e.g. when generating locally)
   const setLocalGameState = (newState) => {
@@ -396,6 +506,10 @@ export function useGameState(roomId, initialGameData) {
     clearNotes, 
     clearModeContent,
     clearModeContentBatch,
+    undo,
+    redo,
+    canUndo: canUndo(),
+    canRedo: canRedo(),
     isOffline, 
     setLocalGameState 
   };

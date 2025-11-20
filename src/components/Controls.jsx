@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-export default function Controls({ onNumberClick, onDelete, onRegenerate, onShare, inputMode, onModeChange, isMultiSelectActive, onMultiSelectToggle, onShowRules }) {
+export default function Controls({ onNumberClick, onDelete, onRegenerate, onShare, inputMode, onModeChange, isMultiSelectActive, onMultiSelectToggle, onShowRules, onUndo, onRedo, canUndo, canRedo }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem', width: '100%', maxWidth: '18.75rem' }}>
 
@@ -14,6 +14,40 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             title="How to Play"
         >
             ?
+        </button>
+        <button 
+            className="btn btn-secondary" 
+            onClick={onUndo}
+            disabled={!canUndo}
+            style={{ 
+              flex: '0 0 auto', 
+              padding: '0 0.75rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              opacity: canUndo ? 1 : 0.5,
+              cursor: canUndo ? 'pointer' : 'not-allowed'
+            }}
+            title="Undo (Ctrl+Z)"
+        >
+            ↶
+        </button>
+        <button 
+            className="btn btn-secondary" 
+            onClick={onRedo}
+            disabled={!canRedo}
+            style={{ 
+              flex: '0 0 auto',
+              padding: '0 0.75rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              opacity: canRedo ? 1 : 0.5,
+              cursor: canRedo ? 'pointer' : 'not-allowed'
+            }}
+            title="Redo (Ctrl+Shift+Z)"
+        >
+            ↷
         </button>
         <button className="btn" style={{ flex: '1' }} onClick={onShare}>
             Share Link
