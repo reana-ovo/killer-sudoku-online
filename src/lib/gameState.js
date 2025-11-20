@@ -14,8 +14,35 @@ export function useGameState(roomId, initialGameData) {
   const [loading, setLoading] = useState(isSupabaseConfigured && !initialGameData);
   const [isOffline, setIsOffline] = useState(!isSupabaseConfigured);
   const stateRef = useRef(initialGameData);
+  
+  // Version tracking for local-first sync
+  const [localVersion, setLocalVersion] = useState(0);
+  const localVersionRef = useRef(0);
+  const pendingUpdateTimer = useRef(null);
 
-
+  // Debounced Supabase sync (300ms delay to batch rapid changes)
+  const syncToSupabase = useRef((newState, version) => {
+    if (!isSupabaseConfigured || isOffline) return;
+    
+    // Clear any pending update
+    if (pendingUpdateTimer.current) {
+      clearTimeout(pendingUpdateTimer.current);
+    }
+    
+    // Schedule new update
+    pendingUpdateTimer.current = setTimeout(async () => {
+      try {
+        await supabase
+          .from('games')
+          .update({ 
+            board_state: { ...newState, version, lastModified: Date.now() }
+          })
+          .eq('id', roomId);
+      } catch (e) {
+        console.error("Failed to sync update:", e);
+      }
+    }, 300);
+  }).current;
 
   useEffect(() => {
     if (!roomId) return;
@@ -63,8 +90,16 @@ export function useGameState(roomId, initialGameData) {
           filter: `id=eq.${roomId}`,
         },
         (payload) => {
-          setGameState(payload.new.board_state);
-          stateRef.current = payload.new.board_state;
+          const newState = payload.new.board_state;
+          const remoteVersion = newState?.version || 0;
+          
+          // Only update if remote version is newer than local
+          // This prevents stale updates from overwriting optimistic local changes
+          if (remoteVersion > localVersionRef.current) {
+            setGameState(newState);
+            stateRef.current = newState;
+            // Don't update localVersion - it only increments on local changes
+          }
         }
       )
       .subscribe();
@@ -74,34 +109,43 @@ export function useGameState(roomId, initialGameData) {
     };
   }, [roomId]); // Removed initialGameData dependency to avoid loop, handled in separate effect
 
-  const updateCell = async (row, col, value) => {
+  const updateCell = (row, col, value) => {
     const currentBoard = gameState?.board || stateRef.current?.board;
     if (!currentBoard) return;
 
+    // Increment local version
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
+
+    // Apply change optimistically
     const newBoard = [...currentBoard];
     newBoard[row] = [...newBoard[row]];
     newBoard[row][col] = value;
 
-    const newGameState = { ...(gameState || stateRef.current), board: newBoard };
-    setGameState(newGameState); // Optimistic update
+    const newGameState = { 
+      ...(gameState || stateRef.current), 
+      board: newBoard,
+      version: newVersion,
+      lastModified: Date.now()
+    };
+    
+    setGameState(newGameState);
     stateRef.current = newGameState;
 
-    if (!isOffline && isSupabaseConfigured) {
-        try {
-            await supabase
-            .from('games')
-            .update({ board_state: newGameState })
-            .eq('id', roomId);
-        } catch (e) {
-            console.error("Failed to sync update:", e);
-        }
-    }
+    // Debounced sync to Supabase
+    syncToSupabase(newGameState, newVersion);
   };
 
-  const updateNotes = async (row, col, type, value) => {
+  const updateNotes = (row, col, type, value) => {
       const currentNotes = gameState?.notes || stateRef.current?.notes;
       // If notes don't exist (old game), initialize them
       let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
+      
+      // Increment local version
+      const newVersion = localVersionRef.current + 1;
+      localVersionRef.current = newVersion;
+      setLocalVersion(newVersion);
       
       newNotes[row] = [...newNotes[row]];
       const cellNotes = { ...newNotes[row][col] };
@@ -137,25 +181,27 @@ export function useGameState(roomId, initialGameData) {
 
       newNotes[row][col] = cellNotes;
 
-      const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+      const newGameState = { 
+        ...(gameState || stateRef.current), 
+        notes: newNotes,
+        version: newVersion,
+        lastModified: Date.now()
+      };
+      
       setGameState(newGameState);
       stateRef.current = newGameState;
 
-      if (!isOffline && isSupabaseConfigured) {
-        try {
-            await supabase
-            .from('games')
-            .update({ board_state: newGameState })
-            .eq('id', roomId);
-        } catch (e) {
-            console.error("Failed to sync update:", e);
-        }
-    }
+      // Debounced sync to Supabase
+      syncToSupabase(newGameState, newVersion);
   };
 
-  const clearModeContent = async (row, col, mode) => {
+  const clearModeContent = (row, col, mode) => {
       const currentNotes = gameState?.notes || stateRef.current?.notes;
       if (!currentNotes) return;
+
+      const newVersion = localVersionRef.current + 1;
+      localVersionRef.current = newVersion;
+      setLocalVersion(newVersion);
 
       let newNotes = [...currentNotes];
       newNotes[row] = [...newNotes[row]];
@@ -171,52 +217,52 @@ export function useGameState(roomId, initialGameData) {
 
       newNotes[row][col] = cellNotes;
 
-      const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+      const newGameState = { 
+        ...(gameState || stateRef.current), 
+        notes: newNotes,
+        version: newVersion,
+        lastModified: Date.now()
+      };
       setGameState(newGameState);
       stateRef.current = newGameState;
 
-      if (!isOffline && isSupabaseConfigured) {
-        try {
-            await supabase
-            .from('games')
-            .update({ board_state: newGameState })
-            .eq('id', roomId);
-        } catch (e) {
-            console.error("Failed to sync update:", e);
-        }
-    }
+      syncToSupabase(newGameState, newVersion);
   };
 
   // Batch update for multiple cells (for multi-selection)
-  const updateCellsBatch = async (updates) => {
+  const updateCellsBatch = (updates) => {
     const currentBoard = gameState?.board || stateRef.current?.board;
     if (!currentBoard) return;
+
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
 
     const newBoard = currentBoard.map(row => [...row]);
     updates.forEach(({ row, col, value }) => {
       newBoard[row][col] = value;
     });
 
-    const newGameState = { ...(gameState || stateRef.current), board: newBoard };
+    const newGameState = { 
+      ...(gameState || stateRef.current), 
+      board: newBoard,
+      version: newVersion,
+      lastModified: Date.now()
+    };
     setGameState(newGameState);
     stateRef.current = newGameState;
 
-    if (!isOffline && isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('games')
-          .update({ board_state: newGameState })
-          .eq('id', roomId);
-      } catch (e) {
-        console.error("Failed to sync batch update:", e);
-      }
-    }
+    syncToSupabase(newGameState, newVersion);
   };
 
   // Batch update for notes (for multi-selection)
-  const updateNotesBatch = async (updates) => {
+  const updateNotesBatch = (updates) => {
     const currentNotes = gameState?.notes || stateRef.current?.notes;
     let newNotes = currentNotes ? [...currentNotes] : Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
+
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
 
     newNotes = newNotes.map(row => row.map(cell => ({ ...cell })));
 
@@ -264,26 +310,26 @@ export function useGameState(roomId, initialGameData) {
       }
     });
 
-    const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+    const newGameState = { 
+      ...(gameState || stateRef.current), 
+      notes: newNotes,
+      version: newVersion,
+      lastModified: Date.now()
+    };
     setGameState(newGameState);
     stateRef.current = newGameState;
 
-    if (!isOffline && isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('games')
-          .update({ board_state: newGameState })
-          .eq('id', roomId);
-      } catch (e) {
-        console.error("Failed to sync batch update:", e);
-      }
-    }
+    syncToSupabase(newGameState, newVersion);
   };
 
   // Batch clear for mode content (for multi-selection delete)
-  const clearModeContentBatch = async (updates) => {
+  const clearModeContentBatch = (updates) => {
     const currentNotes = gameState?.notes || stateRef.current?.notes;
     if (!currentNotes) return;
+
+    const newVersion = localVersionRef.current + 1;
+    localVersionRef.current = newVersion;
+    setLocalVersion(newVersion);
 
     let newNotes = currentNotes.map(row => row.map(cell => ({ ...cell })));
 
@@ -298,44 +344,40 @@ export function useGameState(roomId, initialGameData) {
       }
     });
 
-    const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+    const newGameState = { 
+      ...(gameState || stateRef.current), 
+      notes: newNotes,
+      version: newVersion,
+      lastModified: Date.now()
+    };
     setGameState(newGameState);
     stateRef.current = newGameState;
 
-    if (!isOffline && isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('games')
-          .update({ board_state: newGameState })
-          .eq('id', roomId);
-      } catch (e) {
-        console.error("Failed to sync batch update:", e);
-      }
-    }
+    syncToSupabase(newGameState, newVersion);
   };
 
-  const clearNotes = async (row, col) => {
+  const clearNotes = (row, col) => {
       const currentNotes = gameState?.notes || stateRef.current?.notes;
       if (!currentNotes) return;
+
+      const newVersion = localVersionRef.current + 1;
+      localVersionRef.current = newVersion;
+      setLocalVersion(newVersion);
 
       let newNotes = [...currentNotes];
       newNotes[row] = [...newNotes[row]];
       newNotes[row][col] = { center: [], corner: [], colors: [] };
 
-      const newGameState = { ...(gameState || stateRef.current), notes: newNotes };
+      const newGameState = { 
+        ...(gameState || stateRef.current), 
+        notes: newNotes,
+        version: newVersion,
+        lastModified: Date.now()
+      };
       setGameState(newGameState);
       stateRef.current = newGameState;
 
-      if (!isOffline && isSupabaseConfigured) {
-        try {
-            await supabase
-            .from('games')
-            .update({ board_state: newGameState })
-            .eq('id', roomId);
-        } catch (e) {
-            console.error("Failed to sync update:", e);
-        }
-    }
+      syncToSupabase(newGameState, newVersion);
   };
 
   // Helper to manually set state (e.g. when generating locally)
