@@ -59,7 +59,6 @@ a {
   backdrop-filter: blur(0.75rem);
   -webkit-backdrop-filter: blur(0.75rem);
   border: 0.0625rem solid var(--glass-border);
-  border-radius: 1rem;
   padding: 2rem;
   box-shadow: 0 0.5rem 2rem 0 rgba(0, 0, 0, 0.1); /* Softer shadow */
 }
