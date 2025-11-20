@@ -36,9 +36,15 @@ a {
   text-decoration: none;
 }
 
+@media (max-width: 42.5rem) {
+  html {
+    font-size: 2.35vw;
+  }
+}
+
 /* Utilities */
 .container {
-  max-width: 1200px;
+  max-width: 75rem;
   margin: 0 auto;
   padding: 2rem;
   min-height: 100vh;
@@ -50,12 +56,12 @@ a {
 
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(0.75rem);
+  -webkit-backdrop-filter: blur(0.75rem);
+  border: 0.0625rem solid var(--glass-border);
   border-radius: 1rem;
   padding: 2rem;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1); /* Softer shadow */
+  box-shadow: 0 0.5rem 2rem 0 rgba(0, 0, 0, 0.1); /* Softer shadow */
 }
 
 .btn {
@@ -72,14 +78,14 @@ a {
 
 .btn:hover {
   background: var(--primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  transform: translateY(-0.0625rem);
+  box-shadow: 0 0.25rem 0.75rem rgba(79, 70, 229, 0.3);
 }
 
 .btn-secondary {
   background: var(--secondary);
   color: var(--foreground);
-  border: 1px solid var(--glass-border);
+  border: 0.0625rem solid var(--glass-border);
 }
 
 .btn-secondary:hover {
@@ -106,7 +112,7 @@ p {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(0.625rem); }
   to { opacity: 1; transform: translateY(0); }
 }
 

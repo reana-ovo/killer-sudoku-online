@@ -3,6 +3,30 @@
 import React from 'react';
 
 export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCells, cages }) {
+  // Touch handling
+  const handleTouchStart = (r, c, e) => {
+    // Prevent default to stop scrolling/zooming while selecting
+    if (e.cancelable) e.preventDefault();
+    onMouseDown(r, c, { ctrlKey: false, metaKey: false, ...e }); // Pass mock event or real event if needed
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.cancelable) e.preventDefault();
+    const touch = e.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    if (element) {
+      // Find the closest cell wrapper if we hit a child element
+      const cell = element.closest('[data-cell="true"]');
+      if (cell) {
+        const r = parseInt(cell.dataset.r);
+        const c = parseInt(cell.dataset.c);
+        if (!isNaN(r) && !isNaN(c)) {
+          onMouseEnter(r, c);
+        }
+      }
+    }
+  };
   if (!gameState) return <div className="glass-panel">Loading Board...</div>;
 
   const { board } = gameState;
@@ -22,10 +46,10 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
     const isTopEdge = !cage.cells.some(cell => cell.r === r - 1 && cell.c === c);
     
     return {
-        borderRight: isRightEdge ? '2px dashed var(--cage-border)' : 'none',
-        borderBottom: isBottomEdge ? '2px dashed var(--cage-border)' : 'none',
-        borderLeft: isLeftEdge ? '2px dashed var(--cage-border)' : 'none',
-        borderTop: isTopEdge ? '2px dashed var(--cage-border)' : 'none',
+        borderRight: isRightEdge ? '0.125rem dashed var(--cage-border)' : 'none',
+        borderBottom: isBottomEdge ? '0.125rem dashed var(--cage-border)' : 'none',
+        borderLeft: isLeftEdge ? '0.125rem dashed var(--cage-border)' : 'none',
+        borderTop: isTopEdge ? '0.125rem dashed var(--cage-border)' : 'none',
     };
   };
 
@@ -40,7 +64,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
         width: '100%',
         aspectRatio: '1',
         userSelect: 'none',
-        border: '2px solid var(--foreground)' 
+        border: '0.125rem solid var(--foreground)' 
       }}
     >
       {board.map((row, r) =>
@@ -52,8 +76,8 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
           const isSelected = selectedCells.has(`${r}-${c}`);
 
           // Grid borders (thicker every 3 cells)
-          const borderRight = (c + 1) % 3 === 0 && c !== 8 ? '2px solid var(--foreground)' : '1.5px solid var(--grid-line)';
-          const borderBottom = (r + 1) % 3 === 0 && r !== 8 ? '2px solid var(--foreground)' : '1.5px solid var(--grid-line)';
+          const borderRight = (c + 1) % 3 === 0 && c !== 8 ? '0.125rem solid var(--foreground)' : '0.09375rem solid var(--grid-line)';
+          const borderBottom = (r + 1) % 3 === 0 && r !== 8 ? '0.125rem solid var(--foreground)' : '0.09375rem solid var(--grid-line)';
 
           // Show sum only in the top-left-most cell of the cage
           const showSum = cageInfo && cageInfo.cells[0].r === r && cageInfo.cells[0].c === c;
@@ -97,8 +121,13 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
           return (
             <div
               key={`${r}-${c}`}
+              data-cell="true"
+              data-r={r}
+              data-c={c}
               onMouseDown={(e) => onMouseDown(r, c, e)}
               onMouseEnter={() => onMouseEnter(r, c)}
+              onTouchStart={(e) => handleTouchStart(r, c, e)}
+              onTouchMove={handleTouchMove}
               style={{
                 position: 'relative',
                 borderRight: borderRight,
@@ -106,7 +135,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 'clamp(1rem, 2.5vw, 2rem)', // Responsive font size
+                fontSize: '2rem', // Scaled via root font size
                 fontWeight: 'bold',
                 cursor: 'pointer',
                 background: backgroundColor, // Use 'background' instead of 'backgroundColor' to support gradients
@@ -120,10 +149,10 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
               {cageInfo && (
                   <div style={{
                       position: 'absolute',
-                      top: '4px',
-                      left: '4px',
-                      right: '4px',
-                      bottom: '4px',
+                      top: '0.25rem',
+                      left: '0.25rem',
+                      right: '0.25rem',
+                      bottom: '0.25rem',
                       pointerEvents: 'none',
                       ...cageStyle
                   }} />
@@ -137,10 +166,10 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      borderTop: (!selectedCells.has(`${r-1}-${c}`)) ? '3px solid var(--primary)' : 'none',
-                      borderRight: (!selectedCells.has(`${r}-${c+1}`)) ? '3px solid var(--primary)' : 'none',
-                      borderBottom: (!selectedCells.has(`${r+1}-${c}`)) ? '3px solid var(--primary)' : 'none',
-                      borderLeft: (!selectedCells.has(`${r}-${c-1}`)) ? '3px solid var(--primary)' : 'none',
+                      borderTop: (!selectedCells.has(`${r-1}-${c}`)) ? '0.1875rem solid var(--primary)' : 'none',
+                      borderRight: (!selectedCells.has(`${r}-${c+1}`)) ? '0.1875rem solid var(--primary)' : 'none',
+                      borderBottom: (!selectedCells.has(`${r+1}-${c}`)) ? '0.1875rem solid var(--primary)' : 'none',
+                      borderLeft: (!selectedCells.has(`${r}-${c-1}`)) ? '0.1875rem solid var(--primary)' : 'none',
                       zIndex: 3,
                       pointerEvents: 'none'
                   }} />
@@ -150,14 +179,14 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
               {showSum && (
                 <div style={{
                   position: 'absolute',
-                  top: '0px',
-                  left: '8px',
+                  top: 0,
+                  left: '0.5rem',
                   fontSize: '0.7rem',
                   lineHeight: 1,
                   fontWeight: 'bold',
                   color: 'var(--cage-text)',
                   backgroundColor: cellColors && cellColors.length > 0 ? cellColors[0] : 'var(--background)',
-                  padding: '0 2px',
+                  padding: '0 0.125rem',
                   zIndex: 2,
                   pointerEvents: 'none'
                 }}>
@@ -198,7 +227,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                                 gridTemplateColumns: 'repeat(3, 1fr)',
                                 gridTemplateRows: 'repeat(3, 1fr)',
                                 pointerEvents: 'none',
-                                padding: '6px' // Significantly increased padding
+                                padding: '0.375rem' // Significantly increased padding
                             }}>
                                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
                                     <div key={n} style={{ 

@@ -43,7 +43,7 @@ export default function Home() {
 
   return (
     <main className="container">
-      <div className="glass-panel animate-fade-in" style={{ textAlign: 'center', maxWidth: '600px' }}>
+      <div className="glass-panel animate-fade-in" style={{ textAlign: 'center', maxWidth: '37.5rem' }}>
         <h1>Killer Sudoku Online</h1>
         <p>
           Challenge your friends to a real-time multiplayer Killer Sudoku battle.
@@ -51,7 +51,7 @@ export default function Home() {
         </p>
         
         {!isSupabaseConfigured && (
-            <div style={{ padding: '1rem', background: 'rgba(255, 165, 0, 0.1)', borderRadius: '0.5rem', marginBottom: '1rem', border: '1px solid orange' }}>
+            <div style={{ padding: '1rem', background: 'rgba(255, 165, 0, 0.1)', borderRadius: '0.5rem', marginBottom: '1rem', border: '0.0625rem solid orange' }}>
                 <p style={{ color: 'orange', marginBottom: 0, fontSize: '0.9rem' }}>
                     ⚠️ Multiplayer is disabled (Supabase not configured). Game will run in offline mode.
                 </p>

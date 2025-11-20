@@ -19,6 +19,8 @@ export default function GameRoom() {
   const [inputMode, setInputMode] = useState('answer'); // 'answer', 'center', 'corner', 'color'
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState('add'); // 'add' or 'remove' - for Ctrl+drag behavior
+  const [isMultiSelectActive, setIsMultiSelectActive] = useState(false); // Toggle for mobile multi-selection
+  const [showRules, setShowRules] = useState(false);
 
   // Generate game if needed (offline or explicit create)
   useEffect(() => {
@@ -32,7 +34,7 @@ export default function GameRoom() {
   const handleMouseDown = (r, c, e) => {
       const cellKey = `${r}-${c}`;
       
-      if (e.ctrlKey || e.metaKey) {
+      if (e.ctrlKey || e.metaKey || isMultiSelectActive) {
           // Ctrl+drag: determine mode based on first cell
           const wasSelected = selectedCells.has(cellKey);
           setDragMode(wasSelected ? 'remove' : 'add');
@@ -257,7 +259,7 @@ export default function GameRoom() {
         gap: '2rem' 
       }}>
         {/* Board Container */}
-        <div style={{ flex: '2 1 400px', maxWidth: '650px' }}>
+        <div style={{ flex: '2 1 25rem', maxWidth: '40.625rem' }}>
           <Board 
             gameState={gameState} 
             onMouseDown={handleMouseDown}
@@ -268,24 +270,68 @@ export default function GameRoom() {
         </div>
 
         {/* Controls Container - Takes up less space */}
-        <div style={{ flex: '1 1 300px', maxWidth: '400px' }}>
+        <div style={{ flex: '1 1 18.75rem', maxWidth: '25rem' }}>
           <Controls 
             onNumberClick={handleNumberClick} 
             onDelete={handleDelete} 
             onShare={handleShare}
             inputMode={inputMode}
             onModeChange={setInputMode}
+            isMultiSelectActive={isMultiSelectActive}
+            onMultiSelectToggle={() => setIsMultiSelectActive(prev => !prev)}
+            onShowRules={() => setShowRules(true)}
           />
           
-          <div className="glass-panel" style={{ marginTop: '1rem', padding: '1rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>How to Play</h3>
-            <ul style={{ fontSize: '0.9rem', color: 'var(--cage-text)', paddingLeft: '1.2rem' }}>
-                <li>Fill the grid with numbers 1-9.</li>
-                <li>Normal Sudoku rules apply.</li>
-                <li>Numbers in cages (dashed lines) must sum to the small number.</li>
-                <li>Numbers cannot repeat within a cage.</li>
-            </ul>
-          </div>
+          {/* Rules Modal */}
+          {showRules && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+              backdropFilter: 'blur(0.25rem)'
+            }} onClick={() => setShowRules(false)}>
+              <div 
+                className="glass-panel" 
+                style={{ 
+                  maxWidth: '25rem', 
+                  width: '90%', 
+                  padding: '2rem',
+                  position: 'relative'
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <button 
+                  onClick={() => setShowRules(false)}
+                  style={{
+                    position: 'absolute',
+                    top: '1rem',
+                    right: '1rem',
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: 'var(--foreground)'
+                  }}
+                >
+                  ×
+                </button>
+                <h3 style={{ marginBottom: '1rem' }}>How to Play</h3>
+                <ul style={{ fontSize: '0.9rem', color: 'var(--cage-text)', paddingLeft: '1.2rem', lineHeight: '1.6' }}>
+                    <li>Fill the grid with numbers 1-9.</li>
+                    <li>Normal Sudoku rules apply.</li>
+                    <li>Numbers in cages (dashed lines) must sum to the small number.</li>
+                    <li>Numbers cannot repeat within a cage.</li>
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>
