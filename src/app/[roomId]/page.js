@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useGameState } from '@/lib/gameState';
-import { createNewGame } from '@/lib/sudokuGenerator';
+import { getRandomPuzzle, savePuzzle } from '@/lib/puzzleStore';
+// Worker-based generation
 import Board from '@/components/Board';
 import Header from '@/components/Header';
 import Controls from '@/components/Controls';
@@ -72,6 +73,7 @@ export default function GameRoom() {
   const [isMultiSelectActive, setIsMultiSelectActive] = useState(false); // Toggle for mobile multi-selection
   const [showRules, setShowRules] = useState(false);
   const [difficulty, setDifficulty] = useState(urlDifficulty);
+  const [generationStatus, setGenerationStatus] = useState('');
 
   // Update difficulty when local data is loaded
   useEffect(() => {
@@ -93,44 +95,113 @@ export default function GameRoom() {
     }
   }, [gameState]);
 
-  const handleDifficultyChange = async (newDifficulty) => {
+  // Worker-based game generation
+  const createNewGame = useCallback((targetDifficulty, statusCallback) => {
+    return new Promise((resolve) => {
+      const worker = new Worker(new URL('@/lib/sudoku.worker.js', import.meta.url));
+      
+      worker.onmessage = (e) => {
+        if (e.data.type === 'status') {
+          if (statusCallback) statusCallback(e.data.message);
+        } else if (e.data.type === 'success') {
+          worker.terminate();
+          resolve(e.data.data);
+        } else if (e.data.type === 'failure') {
+          if (statusCallback) statusCallback(e.data.message);
+          worker.terminate();
+          resolve(null);
+        }
+      };
+      
+      worker.postMessage({ difficulty: targetDifficulty });
+    });
+  }, []);
+
+  // Load game: try DB first, then generate
+  const loadGame = useCallback(async (targetDifficulty, forceNew = false, excludeId = null) => {
+    console.log('[loadGame] Starting...');
+    setGenerationStatus('正在加载题目...');
+    
+    let newGame = null;
+    let puzzleId = null;
+
+    if (!forceNew) {
+        const puzzle = await getRandomPuzzle(targetDifficulty, excludeId);
+        if (puzzle) {
+            newGame = puzzle.data;
+            puzzleId = puzzle.id;
+            setGenerationStatus('');
+        }
+    }
+
+    if (!newGame) {
+        newGame = await createNewGame(targetDifficulty, (status) => setGenerationStatus(status));
+        
+        if (!newGame) {
+            return null;
+        }
+        
+        setGenerationStatus('正在保存题目...');
+        const savedId = await savePuzzle(targetDifficulty, newGame);
+        if (savedId) puzzleId = savedId;
+        setGenerationStatus('');
+    }
+
+    if (puzzleId) {
+        newGame.puzzleId = puzzleId;
+    }
+
+    return newGame;
+  }, [createNewGame]);
+
+  const handleDifficultyChange = useCallback(async (newDifficulty) => {
     setDifficulty(newDifficulty);
     if (!isMultiplayerEnabled) {
-        const newGame = await createNewGame(newDifficulty);
-        setLocalGameState(newGame);
-        clearUndoHistory();
+        const newGame = await loadGame(newDifficulty);
+        if (newGame) {
+          setLocalGameState(newGame);
+          clearUndoHistory();
+        }
     } else {
         if (confirm('Changing difficulty will start a new game for everyone. Continue?')) {
-            const newGame = await createNewGame(newDifficulty);
-            setLocalGameState(newGame);
-            clearUndoHistory();
+            const newGame = await loadGame(newDifficulty);
+            if (newGame) {
+              setLocalGameState(newGame);
+              clearUndoHistory();
+            }
         } else {
             setDifficulty(difficulty); 
         }
     }
-  };
+  }, [isMultiplayerEnabled, loadGame, setLocalGameState, clearUndoHistory, difficulty]);
+
+  const handleNewGame = useCallback(async () => {
+    if (isMultiplayerEnabled && !confirm('生成新题目将开始新游戏，确定吗？')) return;
+    const newGame = await loadGame(difficulty, true);
+    if (newGame) {
+      setLocalGameState(newGame);
+      clearUndoHistory();
+    }
+  }, [isMultiplayerEnabled, difficulty, loadGame, setLocalGameState, clearUndoHistory]);
 
   // Generate game if needed (offline or explicit create)
   useEffect(() => {
-      // Only generate if:
-      // 1. We have finished checking for local data
-      // 2. We don't have a gameState yet
-      // 3. We don't have initial local data (or we do, but we want to create new)
-      // 4. We are in local mode OR explicitly creating
       if (isLocalDataLoaded && !gameState && !initialLocalData && (!isMultiplayerEnabled || shouldCreate)) {
           const initGame = async () => {
-            console.log("Generating new game locally...");
-            const newGame = await createNewGame(difficulty);
-            setLocalGameState(newGame);
-            clearUndoHistory();
+            console.log("Initializing game...");
+            setGenerationStatus('初始化中...');
+            const newGame = await loadGame(difficulty);
+            if (newGame) {
+              setLocalGameState(newGame);
+              clearUndoHistory();
+            }
             
-            // Remove ?create=true from URL to prevent resetting to offline on refresh
             const newUrl = window.location.pathname;
             window.history.replaceState({}, '', newUrl);
           };
           initGame();
       }
-  }, [gameState, isMultiplayerEnabled, shouldCreate, setLocalGameState, clearUndoHistory, difficulty, initialLocalData, isLocalDataLoaded]);
+  }, [gameState, isMultiplayerEnabled, shouldCreate, setLocalGameState, clearUndoHistory, difficulty, initialLocalData, isLocalDataLoaded, loadGame]);
 
 
 
@@ -382,57 +453,59 @@ export default function GameRoom() {
   }
 
   return (
-    <main style={{ padding: '1rem', width: '100%', maxWidth: '100%' }}>
-      <Header 
-        difficulty={difficulty}
-        onDifficultyChange={handleDifficultyChange}
-        users={users}
-        currentUser={currentUser}
-        onUpdateName={updateUserName}
-        isMultiplayerEnabled={isMultiplayerEnabled}
-        onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
-        isConnected={isConnected}
-      />
+    <main style={{ 
+      padding: '1rem', 
+      width: '100%', 
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
+    }}>
+      <div style={{ width: '100%', maxWidth: '65rem' }}>
+        <Header 
+          difficulty={difficulty}
+          users={users}
+          isMultiplayerEnabled={isMultiplayerEnabled}
+          onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
+          isConnected={isConnected}
+          puzzleId={gameState?.puzzleId}
+          onNextPuzzle={() => loadGame(difficulty, false, gameState?.puzzleId)}
+          onNewGame={handleNewGame}
+          generationStatus={generationStatus}
+        />
 
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'row', /* Default to row for desktop */
-        flexWrap: 'wrap', /* Wrap on smaller screens */
-        alignItems: 'flex-start', 
-        justifyContent: 'center',
-        width: '100%', 
-        gap: '2rem' 
-      }}>
-        {/* Board Container */}
-        <div style={{ flex: '2 1 25rem', maxWidth: '40.625rem' }}>
-          <Board 
-            gameState={gameState} 
-            onMouseDown={handleMouseDown}
-            onMouseEnter={handleMouseEnter}
-            selectedCells={selectedCells}
-            cages={gameState.cages}
-          />
-        </div>
+        <div className="game-container">
+          {/* Board Container - Fixed width as requested */}
+          <div style={{ flex: '0 0 40.625rem', width: '40.625rem', maxWidth: '100%' }}>
+            <Board 
+              key={gameState?.puzzleId || 'board'}
+              gameState={gameState} 
+              onMouseDown={handleMouseDown}
+              onMouseEnter={handleMouseEnter}
+              selectedCells={selectedCells}
+              cages={gameState.cages}
+            />
+          </div>
 
-        {/* Controls Container */}
-        <div style={{ flex: '0 1 auto', maxWidth: '100%' }}>
-          <Controls 
-            onNumberClick={handleNumberClick} 
-            onDelete={handleDelete} 
-            onShare={handleShare}
-            inputMode={inputMode}
-            onModeChange={setInputMode}
-            isMultiSelectActive={isMultiSelectActive}
-            onMultiSelectToggle={() => setIsMultiSelectActive(prev => !prev)}
-            onShowRules={() => setShowRules(true)}
-            onUndo={undo}
-            onRedo={redo}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            isMultiplayerEnabled={isMultiplayerEnabled}
-            onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
-            isConnected={isConnected}
-          />
+          {/* Controls Container */}
+          <div style={{ flex: '1 1 20rem', maxWidth: '25rem' }}>
+            <Controls 
+              onNumberClick={handleNumberClick} 
+              onDelete={handleDelete} 
+              onShare={handleShare}
+              inputMode={inputMode}
+              onModeChange={setInputMode}
+              isMultiSelectActive={isMultiSelectActive}
+              onMultiSelectToggle={() => setIsMultiSelectActive(prev => !prev)}
+              onShowRules={() => setShowRules(true)}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              isMultiplayerEnabled={isMultiplayerEnabled}
+              onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
+              isConnected={isConnected}
+            />
           
           {/* Rules Modal */}
           {showRules && (
@@ -484,8 +557,133 @@ export default function GameRoom() {
               </div>
             </div>
           )}
+
+          {/* Generation Status Modal */}
+          {generationStatus && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              backdropFilter: 'blur(0.25rem)'
+            }}>
+              <div style={{
+                background: 'var(--background)',
+                padding: '2rem',
+                borderRadius: '1rem',
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                maxWidth: '30rem',
+                width: '90%',
+                boxShadow: '0 0.5rem 2rem rgba(0,0,0,0.3)'
+              }}>
+                <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', textAlign: 'center' }}>
+                  {generationStatus.includes('失败') ? '生成失败' : '正在生成题目'}
+                </h3>
+                <div style={{
+                  padding: '1rem',
+                  background: 'rgba(0, 0, 0, 0.03)',
+                  borderRadius: '0.5rem',
+                  fontFamily: 'monospace',
+                  fontSize: '0.9rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  minHeight: '3rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: generationStatus.includes('失败') ? 'var(--error)' : 'inherit'
+                }}>
+                  {generationStatus}
+                </div>
+                
+                {generationStatus.includes('失败') ? (
+                    <div style={{
+                      marginTop: '1.5rem',
+                      display: 'flex',
+                      gap: '1rem',
+                      justifyContent: 'center'
+                    }}>
+                      <button
+                        onClick={() => router.push('/')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          borderRadius: '0.5rem',
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface)',
+                          color: 'var(--foreground)',
+                          cursor: 'pointer',
+                          fontSize: '1rem'
+                        }}
+                      >
+                        返回首页
+                      </button>
+                      <button
+                        onClick={() => {
+                            setGenerationStatus('准备重试...');
+                            handleNewGame();
+                        }}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          borderRadius: '0.5rem',
+                          border: 'none',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          cursor: 'pointer',
+                          fontSize: '1rem'
+                        }}
+                      >
+                        重试
+                      </button>
+                    </div>
+                ) : (
+                    <div style={{
+                      marginTop: '1rem',
+                      display: 'flex',
+                      justifyContent: 'center'
+                    }}>
+                      <div style={{
+                        width: '2rem',
+                        height: '2rem',
+                        border: '3px solid rgba(0, 0, 0, 0.1)',
+                        borderTopColor: 'var(--primary)',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }} />
+                    </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         </div>
       </div>
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .game-container {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: flex-start;
+          justify-content: flex-start;
+          width: 100%;
+          gap: 2rem;
+          margin-top: 1rem;
+        }
+        @media (max-width: 1100px) {
+          .game-container {
+            justify-content: center;
+          }
+        }
+      `}</style>
     </main>
   );
 }

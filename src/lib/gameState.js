@@ -66,6 +66,9 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
         if (initialGameData.difficulty) {
           ymeta.set('difficulty', initialGameData.difficulty);
         }
+        if (initialGameData.puzzleId) {
+          ymeta.set('puzzleId', initialGameData.puzzleId);
+        }
       }, 'init');
     }
   }, [initialGameData, yboard, ynotes, ycages, ygivens, ymeta]);
@@ -96,8 +99,9 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
       const cages = [];
       ycages.forEach(cage => cages.push(cage));
 
-      // Get difficulty
+      // Get difficulty and puzzleId
       const difficulty = ymeta.get('difficulty');
+      const puzzleId = ymeta.get('puzzleId');
 
       // Get givens
       const givens = new Set();
@@ -108,6 +112,7 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
         notes,
         cages,
         difficulty,
+        puzzleId,
         givens
       });
     };
@@ -149,6 +154,7 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
         notes: gameState.notes,
         cages: gameState.cages,
         difficulty: gameState.difficulty, // Save difficulty too
+        puzzleId: gameState.puzzleId, // Save puzzleId
         givens: Array.from(gameState.givens || []) // Save givens
       };
       localStorage.setItem(`killer-sudoku-${roomId}`, JSON.stringify(dataToSave));
@@ -354,6 +360,9 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
 
       if (newState.difficulty) {
         ymeta.set('difficulty', newState.difficulty);
+      }
+      if (newState.puzzleId) {
+        ymeta.set('puzzleId', newState.puzzleId);
       }
     });
   }, [yboard, ynotes, ycages, ymeta, ygivens]);

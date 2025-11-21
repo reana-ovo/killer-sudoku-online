@@ -88,6 +88,8 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
         </button>
       </div>
 
+
+
       {/* Multiplayer Share Modal */}
       {showShareModal && (
         <div style={{
