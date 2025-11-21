@@ -100,6 +100,23 @@ export class SupabaseYjsProvider extends Observable {
         }
       });
 
+    // Presence
+    this.channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = this.channel.presenceState();
+        const users = [];
+        for (const key in state) {
+          users.push(...state[key]);
+        }
+        this.emit('awareness', [users]);
+      })
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // console.log('Join:', newPresences);
+      })
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        // console.log('Leave:', leftPresences);
+      });
+
     // 3. Listen to local updates
     this.doc.on('update', this.onUpdate);
   }
@@ -118,6 +135,12 @@ export class SupabaseYjsProvider extends Observable {
     this.connected = false;
     this.emit('disconnect', [this]);
     this.emit('status', [{ status: 'disconnected' }]);
+  }
+
+  async updateUser(user) {
+    if (this.channel && this.connected) {
+      await this.channel.track(user);
+    }
   }
 
   onUpdate(update, origin) {

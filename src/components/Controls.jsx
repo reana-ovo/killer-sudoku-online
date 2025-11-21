@@ -2,6 +2,8 @@
 
 import React from 'react';
 
+
+
 export default function Controls({ onNumberClick, onDelete, onRegenerate, onShare, inputMode, onModeChange, isMultiSelectActive, onMultiSelectToggle, onShowRules, onUndo, onRedo, canUndo, canRedo, isMultiplayerEnabled, onToggleMultiplayer, isConnected }) {
   const [showShareModal, setShowShareModal] = React.useState(false);
 
@@ -18,7 +20,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
       {/* Top utility buttons - horizontal on desktop, vertical on mobile */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(3, 1fr)',
         gap: '0.5rem'
       }}>
         {/* Undo */}
@@ -35,7 +37,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
               opacity: canUndo ? 1 : 0.5,
               cursor: canUndo ? 'pointer' : 'not-allowed'
             }}
-            title="Undo (Ctrl+Z)"
+            title="撤销 (Ctrl+Z)"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7v6h6" />
@@ -57,34 +59,11 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
               opacity: canRedo ? 1 : 0.5,
               cursor: canRedo ? 'pointer' : 'not-allowed'
             }}
-            title="Redo (Ctrl+Shift+Z)"
+            title="重做 (Ctrl+Shift+Z)"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 7v6h-6" />
                 <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
-            </svg>
-        </button>
-
-        {/* Multiplayer */}
-        <button 
-            className={`btn ${isMultiplayerEnabled ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={handleMultiplayerClick}
-            style={{ 
-                padding: '0', 
-                aspectRatio: '1', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                backgroundColor: isMultiplayerEnabled ? 'var(--primary)' : undefined,
-                color: isMultiplayerEnabled ? 'white' : undefined
-            }}
-            title={isMultiplayerEnabled ? "Share Game" : "Enable Multiplayer"}
-        >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
         </button>
 
@@ -99,7 +78,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                 alignItems: 'center', 
                 justifyContent: 'center' 
             }}
-            title="How to Play"
+            title="游戏规则"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
@@ -149,12 +128,12 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
               ×
             </button>
             <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>
-              {isConnected ? 'Invite Players' : 'Creating Room...'}
+              {isConnected ? '邀请玩家' : '正在创建房间...'}
             </h2>
             <p style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
               {isConnected 
-                ? 'Share this link to play with others in real-time.' 
-                : 'Please wait while we connect to the server...'}
+                ? '分享此链接邀请好友实时对战。' 
+                : '正在连接服务器，请稍候...'}
             </p>
             
             {!isConnected ? (
@@ -182,7 +161,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                   setShowShareModal(false);
                 }}
               >
-                Copy Link
+                复制链接
               </button>
             )}
           </div>
@@ -220,7 +199,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             className={`btn ${inputMode === 'answer' ? '' : 'btn-secondary'}`} 
             style={{ padding: '0', aspectRatio: '1', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
             onClick={() => onModeChange('answer')}
-            title="Answer Mode"
+            title="填数模式"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -257,7 +236,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             className={`btn ${inputMode === 'center' ? '' : 'btn-secondary'}`} 
             style={{ padding: '0', aspectRatio: '1', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
             onClick={() => onModeChange('center')}
-            title="Center Mark Mode"
+            title="中心标记模式"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -294,7 +273,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             className={`btn ${inputMode === 'corner' ? '' : 'btn-secondary'}`} 
             style={{ padding: '0', aspectRatio: '1', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
             onClick={() => onModeChange('corner')}
-            title="Corner Mark Mode"
+            title="角落标记模式"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -318,7 +297,7 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
                 backgroundColor: isMultiSelectActive ? 'var(--primary)' : undefined,
                 color: isMultiSelectActive ? 'white' : undefined
             }}
-            title="Multi-Select Toggle (Ctrl)"
+            title="多选模式 (Ctrl)"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7" />
@@ -332,13 +311,13 @@ export default function Controls({ onNumberClick, onDelete, onRegenerate, onShar
             onClick={onDelete}
             style={{ gridColumn: 'span 2', color: 'var(--error)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}
         >
-            ⌫ Delete
+            ⌫ 删除
         </button>
         <button 
             className={`btn ${inputMode === 'color' ? '' : 'btn-secondary'}`} 
             style={{ padding: '0', aspectRatio: '1', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
             onClick={() => onModeChange('color')}
-            title="Color Mode"
+            title="颜色标记模式"
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />

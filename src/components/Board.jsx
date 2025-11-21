@@ -285,7 +285,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                 fontWeight: 'bold',
                 cursor: 'pointer',
                 background: backgroundColor, // Use 'background' instead of 'backgroundColor' to support gradients
-                color: cellValue === 0 ? 'transparent' : '#3b82f6', // Answer: Blue
+                color: cellValue === 0 ? 'transparent' : (gameState.givens && gameState.givens.has(`${r}-${c}`) ? 'var(--foreground)' : '#3b82f6'), // Givens: Black, Answer: Blue
                 // overflow: 'hidden', // REMOVED to allow inner corners to extend
                 aspectRatio: '1/1', // Enforce square aspect ratio
                 transition: 'background 0.2s ease'
@@ -339,7 +339,7 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                 ) : (
                     <>
                         {/* Center Notes */}
-                        {gameState.notes && gameState.notes[r][c].center.length > 0 && (
+                        {gameState.notes?.[r]?.[c]?.center?.length > 0 && (
                             <div style={{ 
                                 fontSize: '0.8rem', 
                                 lineHeight: 1, 
@@ -349,12 +349,12 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                                 justifyContent: 'center',
                                 maxWidth: '100%'
                             }}>
-                                {gameState.notes[r][c].center.join('')}
+                                {gameState.notes?.[r]?.[c]?.center.join('')}
                             </div>
                         )}
                         
                         {/* Corner Notes */}
-                        {gameState.notes && gameState.notes[r][c].corner.length > 0 && (
+                        {gameState.notes?.[r]?.[c]?.corner?.length > 0 && (
                             <div style={{
                                 position: 'absolute',
                                 top: 0,
@@ -365,17 +365,17 @@ export default function Board({ gameState, onMouseDown, onMouseEnter, selectedCe
                                 gridTemplateColumns: 'repeat(3, 1fr)',
                                 gridTemplateRows: 'repeat(3, 1fr)',
                                 pointerEvents: 'none',
-                                padding: '0.375rem' // Significantly increased padding
+                                padding: '0.1rem'
                             }}>
                                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
                                     <div key={n} style={{ 
                                         display: 'flex', 
                                         alignItems: 'center', 
                                         justifyContent: 'center',
-                                        fontSize: '0.7rem', // Adjusted font size
+                                        fontSize: '0.6rem',
                                         fontWeight: 'bold',
                                         color: '#a855f7', // Corner: Purple
-                                        visibility: gameState.notes[r][c].corner.includes(n) ? 'visible' : 'hidden'
+                                        visibility: gameState.notes?.[r]?.[c]?.corner?.includes(n) ? 'visible' : 'hidden'
                                     }}>
                                         {n}
                                     </div>

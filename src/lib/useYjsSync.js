@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import * as Y from 'yjs';
 import { SupabaseYjsProvider } from './SupabaseYjsProvider';
 import { UndoManager } from 'yjs';
@@ -19,62 +19,93 @@ export function useYjsSync(roomId, enabled = true, initialGameData) {
   const yboard = useMemo(() => ydoc.getArray('board'), [ydoc]);
   const ynotes = useMemo(() => ydoc.getMap('notes'), [ydoc]);
   const ycages = useMemo(() => ydoc.getArray('cages'), [ydoc]);
+  const ymeta = useMemo(() => ydoc.getMap('meta'), [ydoc]);
+  const ygivens = useMemo(() => ydoc.getArray('givens'), [ydoc]);
   
 
 // ...
 
   // Supabase provider for sync
-  // Create Yjs provider for Supabase
+
+  const [users, setUsers] = useState([]);
+  
+  // Initialize current user with lazy state to avoid effect update
+  const [currentUser, setCurrentUser] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    
+    const storedName = localStorage.getItem('killer-sudoku-name');
+    const randomId = Math.random().toString(36).substr(2, 9);
+    const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16);
+    
+    return {
+      id: randomId,
+      name: storedName || `Player ${randomId.substr(0, 4)}`,
+      color: randomColor,
+      online_at: new Date().toISOString(),
+    };
+  });
+
   const provider = useMemo(() => {
     if (!enabled || !roomId) return null;
 
-    return new SupabaseYjsProvider(
-      ydoc,
-      supabase,
-      {
-        channel: `game:${roomId}`,
-        tableName: 'yjs_updates',
-        roomId: roomId
-      }
-    );
-  }, [ydoc, roomId, enabled]);
+    // ... (existing provider creation)
+    const p = new SupabaseYjsProvider(ydoc, supabase, {
+      channel: `room_${roomId}`,
+      tableName: 'yjs_updates',
+      roomId: roomId
+    });
+    return p;
+  }, [roomId, enabled, ydoc]);
 
-  // Monitor connection status
   useEffect(() => {
-    if (!provider) return;
-
-    const handleSync = (isSynced) => {
-      setIsSynced(true);
-      console.log('Yjs: Synced with Supabase');
-    };
+    if (!provider) {
+      return;
+    }
 
     const handleConnect = () => {
       setIsConnected(true);
-      console.log('Yjs: Connected to Supabase');
+      if (currentUser) {
+        provider.updateUser(currentUser);
+      }
+    };
+    
+    const handleDisconnect = () => setIsConnected(false);
+    const handleSync = (synced) => setIsSynced(synced);
+    const handleAwareness = (usersList) => {
+      setUsers(usersList);
     };
 
-    const handleDisconnect = () => {
-      setIsConnected(false);
-      console.log('Yjs: Disconnected from Supabase');
-    };
-
-    provider.on('sync', handleSync);
     provider.on('connect', handleConnect);
     provider.on('disconnect', handleDisconnect);
+    provider.on('sync', handleSync);
+    provider.on('awareness', handleAwareness);
 
-    // Connect after listeners are attached
     provider.connect();
 
     return () => {
-      provider.off('sync', handleSync);
       provider.off('connect', handleConnect);
       provider.off('disconnect', handleDisconnect);
+      provider.off('sync', handleSync);
+      provider.off('awareness', handleAwareness);
+      provider.destroy();
+      
+      // Reset state on cleanup/provider change
       setIsConnected(false);
       setIsSynced(false);
     };
-  }, [provider]);
+  }, [provider, currentUser]); // Re-run if currentUser changes to track immediately
 
-  // Undo Manager (tracks changes to board and notes only, not cages)
+  const updateUserName = useCallback((newName) => {
+    if (!currentUser) return;
+    const updatedUser = { ...currentUser, name: newName };
+    setCurrentUser(updatedUser);
+    localStorage.setItem('killer-sudoku-name', newName);
+    if (provider && isConnected) {
+      provider.updateUser(updatedUser);
+    }
+  }, [currentUser, provider, isConnected]);
+
+  // Undo Manager (tracks changes to board and notes only, not cages or givens)
   const undoManager = useMemo(() => {
     const manager = new UndoManager([yboard, ynotes], {
       trackedOrigins: new Set([null]) // Track all local changes
@@ -96,6 +127,9 @@ export function useYjsSync(roomId, enabled = true, initialGameData) {
     yboard,
     ynotes,
     ycages,
+    ymeta,
+    ygivens,
+    provider,
     provider,
     undoManager,
     isConnected,

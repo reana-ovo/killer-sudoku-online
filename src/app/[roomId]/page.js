@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useGameState } from '@/lib/gameState';
 import { createNewGame } from '@/lib/sudokuGenerator';
 import Board from '@/components/Board';
+import Header from '@/components/Header';
 import Controls from '@/components/Controls';
 
 export default function GameRoom() {
@@ -13,30 +14,127 @@ export default function GameRoom() {
   const searchParams = useSearchParams();
   const roomId = params.roomId;
   const shouldCreate = searchParams.get('create') === 'true';
+  const urlDifficulty = searchParams.get('difficulty') || 'Medium';
   
+  // Load local data asynchronously to avoid hydration mismatch
+  const [initialLocalData, setInitialLocalData] = useState(null);
+  const [isLocalDataLoaded, setIsLocalDataLoaded] = useState(false);
   const [isMultiplayerEnabled, setIsMultiplayerEnabled] = useState(!shouldCreate);
-  const { gameState, loading, updateCell, updateCellsBatch, updateNotes, updateNotesBatch, clearNotes, clearModeContent, clearModeContentBatch, undo, redo, canUndo, canRedo, clearUndoHistory, isOffline, isConnected, setLocalGameState } = useGameState(roomId, null, isMultiplayerEnabled);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`killer-sudoku-${roomId}`);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setInitialLocalData(parsed);
+          // If we found local data, we should be in local mode
+          if (!shouldCreate) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setIsMultiplayerEnabled(false);
+          }
+        } catch (e) {
+          console.error('Failed to parse local game data:', e);
+        }
+      }
+      setIsLocalDataLoaded(true);
+    }
+  }, [roomId, shouldCreate]);
+
+  const { 
+    gameState, 
+    loading, 
+    updateCell, 
+    updateCellsBatch, 
+    updateNotes, 
+    updateNotesBatch, 
+    clearNotes, 
+    clearModeContent, 
+    clearModeContentBatch, 
+    undo, 
+    redo, 
+    canUndo, 
+    canRedo, 
+    clearUndoHistory, 
+    isOffline, 
+    isConnected, 
+    setLocalGameState,
+    users,
+    currentUser,
+    updateUserName
+  } = useGameState(roomId, initialLocalData, isMultiplayerEnabled);
+  
   const [selectedCells, setSelectedCells] = useState(new Set()); // Set of "r-c" strings
   const [inputMode, setInputMode] = useState('answer'); // 'answer', 'center', 'corner', 'color'
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState('add'); // 'add' or 'remove' - for Ctrl+drag behavior
   const [isMultiSelectActive, setIsMultiSelectActive] = useState(false); // Toggle for mobile multi-selection
   const [showRules, setShowRules] = useState(false);
+  const [difficulty, setDifficulty] = useState(urlDifficulty);
+
+  // Update difficulty when local data is loaded
+  useEffect(() => {
+    if (initialLocalData && initialLocalData.difficulty) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDifficulty(initialLocalData.difficulty);
+    }
+  }, [initialLocalData]);
+
+  // Use ref to track if we've synced difficulty from gameState
+  const hasInitializedDifficulty = React.useRef(false);
+  
+  // Update difficulty if gameState has it (when joining) - only once
+  useEffect(() => {
+    if (gameState && gameState.difficulty && !hasInitializedDifficulty.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDifficulty(gameState.difficulty);
+      hasInitializedDifficulty.current = true;
+    }
+  }, [gameState]);
+
+  const handleDifficultyChange = async (newDifficulty) => {
+    setDifficulty(newDifficulty);
+    if (!isMultiplayerEnabled) {
+        const newGame = await createNewGame(newDifficulty);
+        setLocalGameState(newGame);
+        clearUndoHistory();
+    } else {
+        if (confirm('Changing difficulty will start a new game for everyone. Continue?')) {
+            const newGame = await createNewGame(newDifficulty);
+            setLocalGameState(newGame);
+            clearUndoHistory();
+        } else {
+            setDifficulty(difficulty); 
+        }
+    }
+  };
 
   // Generate game if needed (offline or explicit create)
   useEffect(() => {
-      if (!gameState && (!isMultiplayerEnabled || shouldCreate)) {
-          console.log("Generating new game locally...");
-          const newGame = createNewGame();
-          setLocalGameState(newGame);
-          clearUndoHistory();
-          
-          // Remove ?create=true from URL to prevent resetting to offline on refresh
-          const newUrl = window.location.pathname;
-          window.history.replaceState({}, '', newUrl);
+      // Only generate if:
+      // 1. We have finished checking for local data
+      // 2. We don't have a gameState yet
+      // 3. We don't have initial local data (or we do, but we want to create new)
+      // 4. We are in local mode OR explicitly creating
+      if (isLocalDataLoaded && !gameState && !initialLocalData && (!isMultiplayerEnabled || shouldCreate)) {
+          const initGame = async () => {
+            console.log("Generating new game locally...");
+            const newGame = await createNewGame(difficulty);
+            setLocalGameState(newGame);
+            clearUndoHistory();
+            
+            // Remove ?create=true from URL to prevent resetting to offline on refresh
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+          };
+          initGame();
       }
-  }, [gameState, isMultiplayerEnabled, shouldCreate, setLocalGameState, clearUndoHistory]);
+  }, [gameState, isMultiplayerEnabled, shouldCreate, setLocalGameState, clearUndoHistory, difficulty, initialLocalData, isLocalDataLoaded]);
 
+
+
+  // ... (mouse handlers remain the same)
   const handleMouseDown = (r, c, e) => {
       const cellKey = `${r}-${c}`;
       
@@ -92,10 +190,17 @@ export default function GameRoom() {
   const handleNumberClick = useCallback((num) => {
     if (selectedCells.size === 0) return;
 
+    // Filter out given cells from modification
+    const editableCells = [...selectedCells].filter(cellKey => {
+        return !gameState.givens || !gameState.givens.has(cellKey);
+    });
+
+    if (editableCells.length === 0) return;
+
     if (inputMode === 'answer') {
-      // Check if ALL selected cells have this number
+      // Check if ALL editable selected cells have this number
       let allHaveNumber = true;
-      selectedCells.forEach(cellKey => {
+      editableCells.forEach(cellKey => {
         const [r, c] = cellKey.split('-').map(Number);
         if (gameState.board[r][c] !== num) {
           allHaveNumber = false;
@@ -104,7 +209,7 @@ export default function GameRoom() {
 
       // If all have it, remove it. Otherwise, add it to all.
       const updates = [];
-      selectedCells.forEach(cellKey => {
+      editableCells.forEach(cellKey => {
         const [r, c] = cellKey.split('-').map(Number);
         const newValue = allHaveNumber ? 0 : num;
         updates.push({ row: r, col: c, value: newValue });
@@ -113,7 +218,7 @@ export default function GameRoom() {
     } else {
       // For notes mode, check if ALL empty cells have this note
       const emptyCells = [];
-      selectedCells.forEach(cellKey => {
+      editableCells.forEach(cellKey => {
         const [r, c] = cellKey.split('-').map(Number);
         if (gameState.board[r][c] === 0) {
           emptyCells.push({ r, c, key: cellKey });
@@ -167,10 +272,17 @@ export default function GameRoom() {
 
   const handleDelete = useCallback(() => {
     if (selectedCells.size > 0) {
+      // Filter out given cells
+      const editableCells = [...selectedCells].filter(cellKey => {
+        return !gameState.givens || !gameState.givens.has(cellKey);
+      });
+      
+      if (editableCells.length === 0) return;
+
       if (inputMode === 'answer') {
         // Batch clear for answer mode
         const updates = [];
-        selectedCells.forEach(cellKey => {
+        editableCells.forEach(cellKey => {
           const [r, c] = cellKey.split('-').map(Number);
           updates.push({ row: r, col: c, value: 0 });
         });
@@ -178,14 +290,14 @@ export default function GameRoom() {
       } else {
         // Batch clear for mode content
         const updates = [];
-        selectedCells.forEach(cellKey => {
+        editableCells.forEach(cellKey => {
           const [r, c] = cellKey.split('-').map(Number);
           updates.push({ row: r, col: c, mode: inputMode });
         });
         clearModeContentBatch(updates);
       }
     }
-  }, [selectedCells, inputMode, updateCellsBatch, clearModeContentBatch]);
+  }, [selectedCells, inputMode, updateCellsBatch, clearModeContentBatch, gameState]);
 
   // Handle keyboard input
   useEffect(() => {
@@ -228,7 +340,7 @@ export default function GameRoom() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCells, handleNumberClick, handleDelete]);
+  }, [selectedCells, handleNumberClick, handleDelete, undo, redo]);
 
   const handleShare = () => {
     const url = window.location.href;
@@ -237,6 +349,17 @@ export default function GameRoom() {
   };
 
   if (loading || (shouldCreate && !gameState)) {
+    return (
+      <main className="container">
+        <div className="glass-panel">
+          <h2>Loading Game...</h2>
+        </div>
+      </main>
+    );
+  }
+
+  // Show loading state while checking local data or loading game
+  if (!isLocalDataLoaded || loading || (shouldCreate && !gameState)) {
     return (
       <main className="container">
         <div className="glass-panel">
@@ -259,14 +382,17 @@ export default function GameRoom() {
   }
 
   return (
-    <main className="container" style={{ padding: '1rem' }}>
-      <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
-        <h1>Killer Sudoku</h1>
-        <p style={{ marginBottom: '0.5rem' }}>Room: {roomId.slice(0, 8)}...</p>
-        {!isMultiplayerEnabled && <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Local Mode</span>}
-        {isMultiplayerEnabled && !gameState && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>Connecting...</span>}
-        {isOffline && <span style={{ color: 'orange', fontSize: '0.8rem' }}> (Offline - No Config)</span>}
-      </div>
+    <main style={{ padding: '1rem', width: '100%', maxWidth: '100%' }}>
+      <Header 
+        difficulty={difficulty}
+        onDifficultyChange={handleDifficultyChange}
+        users={users}
+        currentUser={currentUser}
+        onUpdateName={updateUserName}
+        isMultiplayerEnabled={isMultiplayerEnabled}
+        onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
+        isConnected={isConnected}
+      />
 
       <div style={{ 
         display: 'flex', 
@@ -305,7 +431,7 @@ export default function GameRoom() {
             canRedo={canRedo}
             isMultiplayerEnabled={isMultiplayerEnabled}
             onToggleMultiplayer={() => setIsMultiplayerEnabled(true)}
-            isConnected={gameState ? isConnected : false}
+            isConnected={isConnected}
           />
           
           {/* Rules Modal */}

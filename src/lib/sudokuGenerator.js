@@ -52,23 +52,37 @@ export function generateSudoku() {
 }
 
 // Generate Cages for Killer Sudoku
-// A simple approach: Randomly walk the grid and group adjacent cells.
-export function generateCages(solutionBoard) {
+// Generate Cages for Killer Sudoku
+export function generateCages(solutionBoard, difficulty = 'Medium', options = {}) {
   const cages = [];
   const visited = Array.from({ length: 9 }, () => Array(9).fill(false));
+  const { uncagedProbability = 0, minCageSize = 1 } = options;
 
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
       if (visited[r][c]) continue;
 
-      const cageSize = Math.floor(Math.random() * 4) + 1; // Cage size 1-4
+      // Uncaged probability check (for Expert mode)
+      if (Math.random() < uncagedProbability) {
+        visited[r][c] = true;
+        continue;
+      }
+
+      // Determine target size
+      // For Hard, we want minCageSize 2, so we pick from 2 to 4 (or 5)
+      // For others, 1 to 4
+      const maxCageSize = 4;
+      const effectiveMin = minCageSize;
+      const targetSize = Math.floor(Math.random() * (maxCageSize - effectiveMin + 1)) + effectiveMin;
+      
       const cageCells = [{ r, c }];
       visited[r][c] = true;
 
       let currentR = r;
       let currentC = c;
 
-      for (let i = 1; i < cageSize; i++) {
+      // Try to grow the cage
+      for (let i = 1; i < targetSize; i++) {
         const neighbors = [
           { r: currentR - 1, c: currentC },
           { r: currentR + 1, c: currentC },
@@ -83,8 +97,26 @@ export function generateCages(solutionBoard) {
             !visited[n.r][n.c]
         );
 
-        if (neighbors.length > 0) {
-          const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+        // Filter neighbors based on difficulty
+        let validNeighbors = neighbors;
+        
+        if (difficulty === 'Medium') {
+            // Prefer neighbors within the same 3x3 box
+            const currentBoxRow = Math.floor(currentR / 3);
+            const currentBoxCol = Math.floor(currentC / 3);
+            
+            const boxNeighbors = neighbors.filter(n => 
+                Math.floor(n.r / 3) === currentBoxRow && 
+                Math.floor(n.c / 3) === currentBoxCol
+            );
+            
+            if (boxNeighbors.length > 0 && Math.random() < 0.9) {
+                validNeighbors = boxNeighbors;
+            }
+        }
+
+        if (validNeighbors.length > 0) {
+          const next = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
           visited[next.r][next.c] = true;
           cageCells.push(next);
           currentR = next.r;
@@ -94,29 +126,261 @@ export function generateCages(solutionBoard) {
         }
       }
 
-      const sum = cageCells.reduce((acc, cell) => acc + solutionBoard[cell.r][cell.c], 0);
-      cages.push({ cells: cageCells, sum });
+      // Post-processing for Hard mode (minCageSize enforcement)
+      // If we ended up with a cage smaller than minCageSize (e.g. size 1),
+      // we must merge it with a neighbor cage.
+      if (cageCells.length < minCageSize) {
+          // Find a neighbor that belongs to an existing cage
+          const neighbors = [
+              { r: cageCells[0].r - 1, c: cageCells[0].c },
+              { r: cageCells[0].r + 1, c: cageCells[0].c },
+              { r: cageCells[0].r, c: cageCells[0].c - 1 },
+              { r: cageCells[0].r, c: cageCells[0].c + 1 },
+          ].filter(n => n.r >= 0 && n.r < 9 && n.c >= 0 && n.c < 9);
+
+          // Find which cage these neighbors belong to
+          // We need to search the 'cages' array. This is O(N) but N is small.
+          let merged = false;
+          for (let n of neighbors) {
+              const neighborCage = cages.find(cage => 
+                  cage.cells.some(cell => cell.r === n.r && cell.c === n.c)
+              );
+              
+              if (neighborCage) {
+                  // Merge into this cage
+                  neighborCage.cells.push(cageCells[0]);
+                  neighborCage.sum += solutionBoard[cageCells[0].r][cageCells[0].c];
+                  merged = true;
+                  break;
+              }
+          }
+          
+          // If we couldn't merge (e.g. surrounded by uncaged cells or boundary), 
+          // we just leave it as is (rare case in Hard mode since full coverage).
+          // But for Hard mode we want NO single cells.
+          // If unmerged, it effectively becomes a single cell cage.
+          // We can't do much else without backtracking.
+          if (!merged) {
+              // If we really can't merge, just add it as a new cage (it will be size 1)
+              // Ideally this shouldn't happen often in full coverage.
+              const sum = cageCells.reduce((acc, cell) => acc + solutionBoard[cell.r][cell.c], 0);
+              cages.push({ cells: cageCells, sum });
+          }
+      } else {
+          const sum = cageCells.reduce((acc, cell) => acc + solutionBoard[cell.r][cell.c], 0);
+          cages.push({ cells: cageCells, sum });
+      }
     }
   }
   return cages;
 }
 
-export function createNewGame() {
-    const solution = generateSudoku();
-    const cages = generateCages(solution);
-    // Create an empty board for the player, but maybe pre-fill some if we want standard Sudoku rules too?
-    // For Killer Sudoku, usually the board is empty, only cages are given.
-    const initialBoard = Array.from({ length: 9 }, () => Array(9).fill(0));
-    
-    // Initialize notes (9x9 grid of { center: [], corner: [], colors: [] })
-  const notes = Array(9).fill(null).map(() => 
-    Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] }))
-  );
+// Solver to check for unique solution
+function countSolutions(board, cages, givens, limit = 2) {
+    let count = 0;
+    const tempBoard = board.map(row => [...row]);
 
-  return {
-    board: initialBoard,
-    solved: solution,
-    cages,
-    notes
-  };
+    // Optimization: Pre-compute cell -> cage mapping
+    const cellToCageMap = new Map();
+    cages.forEach(cage => {
+        cage.cells.forEach(cell => {
+            cellToCageMap.set(`${cell.r}-${cell.c}`, cage);
+        });
+    });
+
+    // Helper to check if placement is valid
+    function isValidPlacement(r, c, num) {
+        // Standard Sudoku checks
+        for (let i = 0; i < 9; i++) {
+            if (tempBoard[r][i] === num) return false;
+            if (tempBoard[i][c] === num) return false;
+        }
+        const startR = r - (r % 3);
+        const startC = c - (c % 3);
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                if (tempBoard[startR + i][startC + j] === num) return false;
+            }
+        }
+
+        // Cage checks
+        const cage = cellToCageMap.get(`${r}-${c}`);
+        if (cage) {
+            // Check duplicate in cage
+            for (const cell of cage.cells) {
+                if (tempBoard[cell.r][cell.c] === num) return false;
+            }
+
+            // Check sum constraint if cage is full
+            let currentSum = num;
+            let filledCount = 1;
+            for (const cell of cage.cells) {
+                const val = tempBoard[cell.r][cell.c];
+                if (val !== 0) {
+                    currentSum += val;
+                    filledCount++;
+                }
+            }
+            
+            // Optimization: if current sum exceeds target, invalid
+            if (currentSum > cage.sum) return false;
+
+            // If cage is full, sum must match exactly
+            if (filledCount === cage.cells.length) {
+                if (currentSum !== cage.sum) return false;
+            }
+        }
+
+        return true;
+    }
+
+    function solve(index) {
+        if (count >= limit) return;
+
+        if (index === 81) {
+            count++;
+            return;
+        }
+
+        const r = Math.floor(index / 9);
+        const c = index % 9;
+
+        // Skip givens
+        if (tempBoard[r][c] !== 0) {
+            solve(index + 1);
+            return;
+        }
+
+        for (let num = 1; num <= 9; num++) {
+            if (isValidPlacement(r, c, num)) {
+                tempBoard[r][c] = num;
+                solve(index + 1);
+                if (count >= limit) return;
+                tempBoard[r][c] = 0;
+            }
+        }
+    }
+    
+    solve(0);
+    return count;
+}
+
+// Note: This function is now async to allow UI updates during retries
+export async function createNewGame(difficulty = 'Medium') {
+    let attempts = 0;
+    const maxAttempts = 50; // Increased retry limit since we are async now
+
+    while (attempts < maxAttempts) {
+        attempts++;
+        
+        // Yield to main thread every few attempts to prevent freezing
+        if (attempts % 2 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        const solution = generateSudoku();
+        
+        let uncagedProbability = 0;
+        let minCageSize = 1;
+        let givensCount = 0;
+
+        if (difficulty === 'Easy') {
+            givensCount = Math.floor(Math.random() * 6) + 4; // 4-9
+            minCageSize = 1;
+            uncagedProbability = 0;
+        } else if (difficulty === 'Medium') {
+            givensCount = 0;
+            minCageSize = 1;
+            uncagedProbability = 0;
+        } else if (difficulty === 'Hard') {
+            givensCount = 0;
+            minCageSize = 2;
+            uncagedProbability = 0;
+        } else if (difficulty === 'Expert') {
+            givensCount = Math.floor(Math.random() * 6); // 0-5
+            
+            if (givensCount > 0) {
+                uncagedProbability = 0.5 + (givensCount * 0.05); 
+            } else {
+                uncagedProbability = 0.35;
+            }
+            minCageSize = 2; 
+        }
+
+        const cages = generateCages(solution, difficulty, { uncagedProbability, minCageSize });
+        
+        // Initialize board and givens
+        const initialBoard = Array.from({ length: 9 }, () => Array(9).fill(0));
+        const givens = new Set();
+
+        if (givensCount > 0) {
+            let candidateCells = [];
+            
+            if (difficulty === 'Expert') {
+                const cagedCells = new Set();
+                cages.forEach(cage => {
+                    cage.cells.forEach(cell => cagedCells.add(`${cell.r}-${cell.c}`));
+                });
+
+                for(let r=0; r<9; r++) {
+                    for(let c=0; c<9; c++) {
+                        if (!cagedCells.has(`${r}-${c}`)) {
+                            candidateCells.push({r, c});
+                        }
+                    }
+                }
+            } else {
+                for(let r=0; r<9; r++) {
+                    for(let c=0; c<9; c++) {
+                        candidateCells.push({r, c});
+                    }
+                }
+            }
+
+            candidateCells.sort(() => Math.random() - 0.5);
+            const countToTake = Math.min(givensCount, candidateCells.length);
+            
+            for(let i=0; i<countToTake; i++) {
+                const {r, c} = candidateCells[i];
+                initialBoard[r][c] = solution[r][c];
+                givens.add(`${r}-${c}`);
+            }
+        }
+
+        // Verify Uniqueness
+        const solutions = countSolutions(initialBoard, cages, givens);
+        
+        if (solutions === 1) {
+            const notes = Array(9).fill(null).map(() => 
+                Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] }))
+            );
+
+            return {
+                board: initialBoard,
+                solved: solution,
+                cages,
+                notes,
+                difficulty,
+                givens: Array.from(givens)
+            };
+        }
+        
+        console.log(`Attempt ${attempts}: Puzzle not unique (solutions: ${solutions}). Retrying...`);
+    }
+
+    console.warn("Failed to generate unique puzzle within attempt limit.");
+    
+    // Fallback
+    const solution = generateSudoku();
+    const cages = generateCages(solution, difficulty, { uncagedProbability: 0.2, minCageSize: 1 });
+    const initialBoard = Array.from({ length: 9 }, () => Array(9).fill(0));
+    const notes = Array(9).fill(null).map(() => Array(9).fill(null).map(() => ({ center: [], corner: [], colors: [] })));
+    return {
+        board: initialBoard,
+        solved: solution,
+        cages,
+        notes,
+        difficulty,
+        givens: []
+    };
 }

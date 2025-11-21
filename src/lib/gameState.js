@@ -11,57 +11,68 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
     yboard, 
     ynotes, 
     ycages, 
+    ymeta,
+    ygivens,
     undoManager, 
     isConnected, 
     isSynced,
-    isOffline 
-  } = useYjsSync(roomId, isMultiplayerEnabled);
+    isOffline,
+    users,
+    currentUser,
+    updateUserName
+  } = useYjsSync(roomId, isMultiplayerEnabled, initialGameData);
 
   // Initialize Yjs document with game data (only once)
   useEffect(() => {
-    if (!initialGameData || yboard.length > 0) return;
-
-    console.log('Initializing Yjs document with game data', { 
-      hasInitialData: !!initialGameData, 
-      yboardLength: yboard.length 
-    });
-    
-    // Use Y.Doc transaction for atomic updates
-    yboard.doc.transact(() => {
-      // Initialize board
-      initialGameData.board.forEach((row) => {
-        const yRow = new Y.Array();
-        row.forEach(cell => yRow.push([cell]));
-        yboard.push([yRow]);
-      });
-
-      // Initialize notes
-      if (initialGameData.notes) {
-        const notesData = {};
-        initialGameData.notes.forEach((row, r) => {
-          row.forEach((cell, c) => {
-            const key = `${r}-${c}`;
-            notesData[key] = cell;
-          });
+    if (initialGameData && yboard.length === 0) {
+      console.log('Initializing Yjs doc with initialGameData', initialGameData);
+      yboard.doc.transact(() => {
+        // Board
+        yboard.delete(0, yboard.length);
+        initialGameData.board.forEach((row) => {
+          const yRow = new Y.Array();
+          row.forEach(cell => yRow.push([cell]));
+          yboard.push([yRow]);
         });
-        ynotes.set('data', notesData);
-      }
+        
+        // Notes
+        if (initialGameData.notes) {
+          const notesData = {};
+          initialGameData.notes.forEach((row, r) => {
+            row.forEach((cell, c) => {
+              const key = `${r}-${c}`;
+              notesData[key] = cell;
+            });
+          });
+          ynotes.clear(); // Clear existing data if any
+          ynotes.set('data', notesData);
+        }
 
-      // Initialize cages
-      if (initialGameData.cages) {
+        // Cages
+        ycages.delete(0, ycages.length);
         initialGameData.cages.forEach(cage => {
           ycages.push([cage]);
         });
-      }
-    }, 'init');
+        
+        // Givens
+        if (initialGameData.givens) {
+            ygivens.delete(0, ygivens.length);
+            initialGameData.givens.forEach(given => {
+              ygivens.push([given]);
+            });
+        }
 
-
-
-  }, [initialGameData, yboard, ynotes, ycages]);
+        // Difficulty
+        if (initialGameData.difficulty) {
+          ymeta.set('difficulty', initialGameData.difficulty);
+        }
+      }, 'init');
+    }
+  }, [initialGameData, yboard, ynotes, ycages, ygivens, ymeta]);
 
   // Observe Yjs changes and update React state
   useEffect(() => {
-    const updateGameState = () => {
+    const updateState = () => {
       // Convert Yjs arrays/maps back to plain JavaScript
       const board = [];
       yboard.forEach(yRow => {
@@ -85,33 +96,64 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
       const cages = [];
       ycages.forEach(cage => cages.push(cage));
 
+      // Get difficulty
+      const difficulty = ymeta.get('difficulty');
+
+      // Get givens
+      const givens = new Set();
+      ygivens.forEach(given => givens.add(given));
+
       setGameState({
         board,
         notes,
-        cages
+        cages,
+        difficulty,
+        givens
       });
     };
 
     // Initial update
     if (yboard.length > 0) {
-      updateGameState();
+      updateState();
     }
 
     // Observe changes
-    const boardObserver = () => updateGameState();
-    const notesObserver = () => updateGameState();
-    const cagesObserver = () => updateGameState();
+    const boardObserver = () => updateState();
+    const notesObserver = () => updateState();
+    const cagesObserver = () => updateState();
+    const metaObserver = () => updateState();
+    const givensObserver = () => updateState();
 
     yboard.observeDeep(boardObserver);
     ynotes.observe(notesObserver);
     ycages.observe(cagesObserver);
+    ymeta.observe(metaObserver);
+    ygivens.observe(givensObserver);
 
     return () => {
       yboard.unobserveDeep(boardObserver);
       ynotes.unobserve(notesObserver);
       ycages.unobserve(cagesObserver);
+      ymeta.unobserve(metaObserver);
+      ygivens.unobserve(givensObserver);
     };
-  }, [yboard, ynotes, ycages]);
+  }, [yboard, ynotes, ycages, ymeta, ygivens]);
+
+
+
+  // Save to localStorage when state changes (if offline)
+  useEffect(() => {
+    if (!isMultiplayerEnabled && gameState) {
+      const dataToSave = {
+        board: gameState.board,
+        notes: gameState.notes,
+        cages: gameState.cages,
+        difficulty: gameState.difficulty, // Save difficulty too
+        givens: Array.from(gameState.givens || []) // Save givens
+      };
+      localStorage.setItem(`killer-sudoku-${roomId}`, JSON.stringify(dataToSave));
+    }
+  }, [gameState, isMultiplayerEnabled, roomId]);
 
   // Update functions - modify Yjs structures (automatic sync!)
   const updateCell = useCallback((row, col, value) => {
@@ -283,6 +325,7 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
       yboard.delete(0, yboard.length);
       ynotes.clear();
       ycages.delete(0, ycages.length);
+      ygivens.delete(0, ygivens.length);
 
       // Set new data
       newState.board.forEach((row) => {
@@ -304,8 +347,16 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
       if (newState.cages) {
         newState.cages.forEach(cage => ycages.push([cage]));
       }
+
+      if (newState.givens) {
+        newState.givens.forEach(given => ygivens.push([given]));
+      }
+
+      if (newState.difficulty) {
+        ymeta.set('difficulty', newState.difficulty);
+      }
     });
-  }, [yboard, ynotes, ycages]);
+  }, [yboard, ynotes, ycages, ymeta, ygivens]);
 
   const clearUndoHistory = useCallback(() => {
     undoManager.clear();
@@ -326,8 +377,11 @@ export function useGameState(roomId, initialGameData, isMultiplayerEnabled = fal
     canUndo,
     canRedo,
     clearUndoHistory,
-    isOffline,
+    isOffline: !isMultiplayerEnabled,
     isConnected,
+    users,
+    currentUser,
+    updateUserName,
     setLocalGameState
   };
 }
